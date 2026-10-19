@@ -1,0 +1,122 @@
+# Políticas de QoS de la Empresa XYZ (historia PCIII-10)
+#
+# La empresa declara aquí, UNA sola vez, qué tráfico importa. El sistema decide
+# después cuándo y cuánto ancho de banda dar, pero nunca puede salirse de estos
+# límites ("autonomía dentro de límites").
+#
+# Cómo se decide la clase de un flujo:
+#   1. Se recorren las "reglas" en orden; gana la primera que coincide.
+#   2. Si ninguna coincide, se usa "servicios_por_defecto" según el servicio.
+#   3. Si el servicio no se conoce, la clase es la de "desconocido".
+
+version: 1
+
+# Objetivos de calidad (KPIs): referencia de toda la evaluación.
+objetivos:
+  jitter_ms: 30            # variación de la latencia
+  perdida_pct: 1.0
+  latencia_p95_ms: 150     # latencia de un sentido, percentil 95 (ITU-T G.114)
+  mos_min: 4.0             # calidad de voz estimada
+
+# Clases de tráfico = colas HTB en cada enlace de acceso.
+# Garantía y techo son % de la capacidad del enlace, así sirven para enlaces
+# de 10, 20, 30 o 50 Mbps. La suma de garantías no puede pasar de 100 %.
+clases:
+  - nombre: tiempo_real
+    prioridad: 0           # 0 = la más alta
+    garantia_pct: 15
+    techo_pct: 40
+    descripcion: "Voz y videollamadas: poca banda, la menor latencia posible"
+  - nombre: critico
+    prioridad: 1
+    garantia_pct: 15
+    techo_pct: 100
+    descripcion: "Operación de máquinas, pagos con tarjeta y sorteos"
+  - nombre: negocio
+    prioridad: 2
+    garantia_pct: 25
+    techo_pct: 100
+    descripcion: "ERP, música de la sala, IA generativa de Sistemas, archivos"
+  - nombre: vigilancia
+    prioridad: 3
+    garantia_pct: 10
+    techo_pct: 50
+    descripcion: "Cámaras vistas en remoto desde la oficina"
+  - nombre: masivo
+    prioridad: 4
+    garantia_pct: 10
+    techo_pct: 100
+    descripcion: "Descargas, respaldos, actualizaciones, navegación general"
+  - nombre: restringido
+    prioridad: 5
+    garantia_pct: 2
+    techo_pct: 20
+    descripcion: "WiFi de clientes y entretenimiento: solo lo que sobre, con tope"
+
+# Reglas por origen y servicio (la matriz área x aplicación). Gana la primera
+# que coincide. Condiciones posibles: segmento, tipo (del equipo de origen) y
+# servicio. Una regla sin "servicio" aplica a todo el tráfico de ese origen.
+reglas:
+  - nombre: "WiFi de clientes siempre restringido"
+    segmento: wifi_clientes
+    clase: restringido
+  - nombre: "Música de la sala (tráfico del negocio aunque sea YouTube)"
+    tipo: pc_musica
+    servicio: streaming
+    clase: negocio
+  - nombre: "IA generativa del área de Sistemas"
+    tipo: pc_sistemas
+    servicio: ia_generativa
+    clase: negocio
+  - nombre: "Llamadas y videollamadas desde cualquier equipo"
+    servicio: [voip, videoconferencia, troncal_sip]
+    clase: tiempo_real
+  - nombre: "Operación de máquinas (reporte en tiempo real a la central)"
+    segmento: maquinas
+    servicio: gestion          # el respaldo del servidor de sala NO es crítico
+    clase: critico
+  - nombre: "Pagos con tarjeta"
+    segmento: pagos
+    servicio: pagos
+    clase: critico
+  - nombre: "PC de sorteos con el sistema central"
+    tipo: pc_sorteos
+    servicio: gestion
+    clase: critico
+  - nombre: "Cámaras vistas desde la oficina"
+    servicio: cctv
+    clase: vigilancia
+
+servicios_por_defecto:
+  videoconferencia: tiempo_real
+  voip: tiempo_real
+  troncal_sip: tiempo_real
+  gestion: critico
+  pagos: critico
+  erp: negocio
+  archivos: negocio
+  cctv: vigilancia
+  ia_generativa: masivo     # para áreas distintas de Sistemas no es prioritaria
+  respaldo: masivo
+  descargas: masivo
+  navegacion: masivo
+  streaming: restringido    # salvo la música de la sala (ver reglas)
+  desconocido: masivo
+
+# Qué servicio ofrece cada tipo de equipo interno (para tráfico entre sedes).
+# Los servidores de Internet ya traen su servicio en empresa_xyz.yaml.
+servicios_internos:
+  servidor_gestion: gestion
+  servidor_sala: gestion
+  central_telefonica: voip
+  telefono_ip: voip
+  servidor_erp: erp
+  servidor_archivos: archivos
+  servidor_respaldo: respaldo
+  nvr: cctv
+
+# Límites para el motor de decisión (se usarán en el Sprint 5).
+motor:
+  clases_protegidas: [tiempo_real, critico]   # su garantía nunca baja de lo declarado
+  histeresis_pct: 10        # no reconfigurar por cambios menores a este %
+  intervalo_min_s: 30       # tiempo mínimo entre reconfiguraciones de un enlace

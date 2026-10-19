@@ -16,9 +16,20 @@ import json
 import os
 import re
 import subprocess
+import sys
 
-# Objetivos de calidad. Pasarán a politicas.yaml en la historia PCIII-10.
-OBJETIVOS = {"jitter_ms": 30.0, "perdida_pct": 1.0, "latencia_ms": 150.0, "mos": 4.0}
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _objetivos():
+    """Objetivos de calidad tomados de politicas/politicas.yaml (fuente única)."""
+    from politicas.cargador import cargar
+    o = cargar().objetivos
+    return {"jitter_ms": float(o["jitter_ms"]), "perdida_pct": float(o["perdida_pct"]),
+            "latencia_ms": float(o["latencia_p95_ms"]), "mos": float(o["mos_min"])}
+
+
+OBJETIVOS = _objetivos()
 
 # Perfiles de las sondas
 VOIP = {"pps": 50, "largo": 160}        # G.711: 50 paquetes/s de 160 bytes (64 kbps)
