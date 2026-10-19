@@ -1,2 +1,3 @@
 .venv/
 topologia/inventario.csv
+__pycache__/
