@@ -1,0 +1,119 @@
+# Red de la Empresa XYZ: oficina central + 4 salas, todas conectadas a la red
+# de un mismo operador. Cada sede tiene su propio enlace de acceso: por él sale
+# su internet y su conexión privada con las demás sedes. Si una sala pierde su
+# enlace, solo esa sala queda aislada.
+#
+# Plan de direcciones:
+#   10.<sede>.<segmento>.0/24     sede 0 = oficina, sedes 1-4 = salas, gateway .1
+#   Equipos de un segmento:       desde .10 en adelante
+#   Enlace de acceso de la sede:  172.16.<sede>.0/30 (operador .1, router de la sede .2)
+#   Internet simulado:            203.0.113.0/24 (rango reservado para documentación)
+#
+# Segmentos (cada uno equivale a una VLAN):
+#   oficina: servidores=10, administracion=20, cctv=40, wifi_personal=50
+#   salas:   maquinas=10, administracion=20, pagos=30, cctv=40,
+#            wifi_personal=50, wifi_clientes=60
+
+empresa: "Empresa XYZ"
+
+horario:                      # se usará en los escenarios y el predictor
+  apertura: "08:00"
+  cierre: "03:00"             # algunas noches no cierran
+  sorteos: "días y horas fijos (se definen en los escenarios)"
+
+internet:
+  servidores:
+    - {nombre: inetvc,    ip: 203.0.113.10, servicio: videoconferencia}
+    - {nombre: inetsip,   ip: 203.0.113.11, servicio: troncal_sip}     # salida de la central telefónica
+    - {nombre: inetia,    ip: 203.0.113.20, servicio: ia_generativa}
+    - {nombre: inetstr,   ip: 203.0.113.30, servicio: streaming}       # YouTube: música y clientes
+    - {nombre: inetupd,   ip: 203.0.113.40, servicio: descargas}
+    - {nombre: inetweb,   ip: 203.0.113.50, servicio: navegacion}
+    - {nombre: inetpago1, ip: 203.0.113.60, servicio: pagos}           # procesadora de pagos A
+    - {nombre: inetpago2, ip: 203.0.113.61, servicio: pagos}           # procesadora de pagos B
+
+oficina:
+  nombre: "Oficina central"
+  enlace: {mbps: 50, retardo_ms: 4}
+  segmentos:
+    servidores:
+      - [cms,  servidor_gestion]       # recibe en tiempo real los datos de las salas
+      - [erp,  servidor_erp]
+      - [arch, servidor_archivos]
+      - [bak,  servidor_respaldo]
+      - [pbx,  central_telefonica]
+    administracion:
+      - [ger,   pc_gerencia]
+      - [con1,  pc_contabilidad]
+      - [con2,  pc_contabilidad]
+      - [sis1,  pc_sistemas]           # usa IA generativa para programar
+      - [sis2,  pc_sistemas]
+      - [rrhh,  pc_rrhh]
+      - [ope,   pc_operaciones]
+      - [sec,   pc_secretaria]
+      - [mon,   pc_monitoreo]          # ve en vivo las cámaras de las salas
+      - [omada, controlador_wifi]      # PC con el controlador de los access points
+      - [imp,   impresora]
+      - [tel1,  telefono_ip]
+      - [tel2,  telefono_ip]
+    wifi_personal:
+      - [cel1, celular]
+      - [cel2, celular]
+      - [cel3, celular]
+  camaras: 8                           # + 1 NVR en el segmento cctv
+
+# Equipos fijos de cada sala (segmento de administración)
+plantilla_sala:
+  administracion:
+    - [caja,   pc_caja]
+    - [musica, pc_musica]              # YouTube con música todo el día (tráfico del negocio)
+    - [sort,   pc_sorteos]
+    - [tel,    telefono_ip]            # registrado en la central de la oficina
+    - [imp,    impresora]
+    - [bio,    biometrico]
+
+salas:
+  - id: 1
+    nombre: "Sala 1"
+    enlace: {mbps: 30, retardo_ms: 5}
+    tragamonedas: 30
+    islas: 3                           # grupos de máquinas, cada uno con su switch
+    derby: 1
+    ruleta: 1
+    camaras: 24
+    pos: 2
+    celulares_personal: 2
+    clientes_wifi: 6                   # cada uno representa a un grupo de celulares
+  - id: 2
+    nombre: "Sala 2"
+    enlace: {mbps: 20, retardo_ms: 6}
+    tragamonedas: 25
+    islas: 3
+    derby: 1
+    ruleta: 1
+    camaras: 20
+    pos: 2
+    celulares_personal: 2
+    clientes_wifi: 5
+  - id: 3
+    nombre: "Sala 3"
+    enlace: {mbps: 20, retardo_ms: 8}
+    tragamonedas: 22
+    islas: 2
+    derby: 1
+    ruleta: 1
+    camaras: 16
+    pos: 2
+    celulares_personal: 2
+    clientes_wifi: 5
+  - id: 4
+    nombre: "Sala 4 (provincia)"
+    enlace: {mbps: 10, retardo_ms: 20}
+    tragamonedas: 15
+    islas: 2
+    derby: 1
+    ruleta: 0
+    camaras: 12
+    pos: 2
+    celulares_personal: 2
+    clientes_wifi: 3
