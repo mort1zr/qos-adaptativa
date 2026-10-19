@@ -1,0 +1,7 @@
+fecha,escenario,estrategia,fase,sede,clase,origen,destino,rtt_ms,latencia_ms,latencia_p95_ms,jitter_ms,jitter_max_ms,perdida_pct,mos,mbps,cumple
+2026-10-19T00:22:32,congestion_sala1,sin_qos,sin_carga,Sala 1,voip,sa1tel,ofpbx,20.3,10.22,11.43,0.66,1.02,0.0,4.4,0.064,sí
+2026-10-19T00:22:32,congestion_sala1,sin_qos,sin_carga,Sala 1,videoconferencia,inetvc,sa1caja,11.1,5.71,6.53,0.48,0.73,0.0,,2.496,sí
+2026-10-19T00:22:32,congestion_sala1,sin_qos,con_descargas,Sala 1,voip,sa1tel,ofpbx,466.1,139.99,533.85,9.1,20.87,0.3,4.28,0.064,sí
+2026-10-19T00:22:32,congestion_sala1,sin_qos,con_descargas,Sala 1,videoconferencia,inetvc,sa1caja,448.4,315.13,600.28,2.56,4.81,0.75,,2.462,no (latencia)
+2026-10-19T00:22:32,congestion_sala1,sin_qos,con_descargas,Sala 1,descargas clientes (bajada),-,-,,,,,,,,23.77,-
+2026-10-19T00:22:32,congestion_sala1,sin_qos,con_descargas,Sala 1,respaldo a oficina (subida),-,-,,,,,,,,16.54,-

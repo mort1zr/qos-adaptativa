@@ -22,6 +22,7 @@ Diseño:
 import argparse
 import csv
 import os
+import socket
 import subprocess
 import sys
 from collections import OrderedDict
@@ -58,6 +59,23 @@ class Router(Node):
     def terminate(self):
         self.cmd("sysctl -qw net.ipv4.ip_forward=0")
         super().terminate()
+
+
+def controlador_activo(ip="127.0.0.1", puerto=6633):
+    """True si hay un controlador escuchando (por ejemplo, Ryu)."""
+    try:
+        with socket.create_connection((ip, puerto), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
+AVISO_RYU = ("No hay controlador en {ip}:{puerto}.\n"
+             "  1. Si acabas de ejecutar 'sudo mn -c', recuerda que eso también apaga Ryu.\n"
+             "  2. Arranca Ryu en otra terminal (con el .venv activo):\n"
+             "       ryu-manager ryu.app.simple_switch_13\n"
+             "  3. Vuelve a ejecutar este comando.\n"
+             "  (O agrega --sin-controlador para probar sin Ryu.)")
 
 
 def sh(cmd):
@@ -210,6 +228,11 @@ class EmpresaXYZ:
 
     # ---------------- configuración tras arrancar ----------------
     def configurar(self, firewall=False):
+        # Sin IPv6: evita la ráfaga de mensajes automáticos (descubrimiento de
+        # vecinos) que satura al controlador al arrancar y ensucia las mediciones.
+        for h in self.net.hosts:
+            h.cmd("sysctl -qw net.ipv6.conf.all.disable_ipv6=1 "
+                  "net.ipv6.conf.default.disable_ipv6=1")
         rop = self.routers["rop"]
         sedes = [0] + [s["id"] for s in self.cfg["salas"]]
         for sid in sedes:
@@ -303,6 +326,10 @@ def main():
 
     if os.geteuid() != 0:
         sys.exit("Ejecuta con sudo: sudo python3 topologia/empresa_xyz.py")
+
+    if not args.sin_controlador and not controlador_activo(args.ip_controlador,
+                                                           args.puerto_controlador):
+        sys.exit(AVISO_RYU.format(ip=args.ip_controlador, puerto=args.puerto_controlador))
 
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
