@@ -1,3 +1,5 @@
 .venv/
 topologia/inventario.csv
 __pycache__/
+datos/
+topologia/switches.csv

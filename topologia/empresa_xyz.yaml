@@ -117,3 +117,33 @@ salas:
     pos: 2
     celulares_personal: 2
     clientes_wifi: 3
+
+# Áreas para la telemetría y los reportes (historia PCIII-16).
+# En el segmento de administración el área sale del tipo de equipo; en los
+# demás segmentos, del segmento. Así se puede preguntar, por ejemplo, cuánto
+# usó Contabilidad o el WiFi de clientes de la Sala 2 en los últimos 10 minutos.
+areas:
+  por_tipo:                    # solo segmento de administración
+    pc_gerencia: Gerencia
+    pc_contabilidad: Contabilidad
+    pc_sistemas: Sistemas
+    controlador_wifi: Sistemas
+    pc_rrhh: RRHH
+    pc_operaciones: Operaciones
+    pc_secretaria: Secretaría
+    pc_monitoreo: Monitoreo
+    telefono_ip: Telefonía
+    impresora: Administración
+    biometrico: Administración
+    pc_caja: Caja
+    pc_musica: Música
+    pc_sorteos: Sorteos
+  por_segmento:
+    servidores: Servidores
+    maquinas: Máquinas
+    administracion: Administración
+    pagos: Pagos
+    cctv: Cámaras
+    wifi_personal: WiFi personal
+    wifi_clientes: WiFi clientes
+    internet: Internet

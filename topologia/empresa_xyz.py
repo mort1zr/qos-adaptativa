@@ -44,6 +44,7 @@ from controlador.colas import (BURST_MS_DEFECTO, HOJA_DEFECTO, ErrorColas,  # no
 
 CONFIG_DEFECTO = os.path.join(AQUI, "empresa_xyz.yaml")
 INVENTARIO = os.path.join(AQUI, "inventario.csv")
+SWITCHES = os.path.join(AQUI, "switches.csv")      # lo lee el controlador (rol y puertos)
 ESTRATEGIAS = ("sin_qos", "colas")
 
 
@@ -87,8 +88,8 @@ def controlador_activo(ip="127.0.0.1", puerto=6633):
 
 AVISO_RYU = ("No hay controlador en {ip}:{puerto}.\n"
              "  1. Si acabas de ejecutar 'sudo mn -c', recuerda que eso también apaga Ryu.\n"
-             "  2. Arranca Ryu en otra terminal (con el .venv activo):\n"
-             "       ryu-manager ryu.app.simple_switch_13\n"
+             "  2. Arranca Ryu en otra terminal (con el .venv activo), desde ~/qos-adaptativa:\n"
+             "       ryu-manager controlador/qos_app.py\n"
              "  3. Vuelve a ejecutar este comando.\n"
              "  (O agrega --sin-controlador para probar sin Ryu.)")
 
@@ -101,8 +102,12 @@ def sh(cmd):
 
 
 class EmpresaXYZ:
-    def __init__(self, cfg, controlador=True, ip_ctrl="127.0.0.1", puerto_ctrl=6633):
+    def __init__(self, cfg, controlador=True, ip_ctrl="127.0.0.1", puerto_ctrl=6633,
+                 datapath="kernel"):
         self.cfg = cfg
+        self.datapath = datapath   # "user" solo para probar sin el módulo del núcleo
+        self.dpids = {}            # nombre del switch -> DPID
+        self.acc = {}              # switch de acceso -> puertos OpenFlow y capacidad
         self.net = Mininet(controller=None, switch=OVSSwitch, build=False)
         self.fail_mode = "secure" if controlador else "standalone"
         self.n_dpid = 0
@@ -118,8 +123,17 @@ class EmpresaXYZ:
     def switch(self, nombre):
         # DPID explícito: Mininet lo deduciría del nombre y habría choques.
         self.n_dpid += 1
+        self.dpids[nombre] = self.n_dpid
+        extra = {"datapath": "user"} if self.datapath == "user" else {}
         return self.net.addSwitch(nombre, dpid=f"{self.n_dpid:016x}",
-                                  protocols="OpenFlow13", failMode=self.fail_mode)
+                                  protocols="OpenFlow13", failMode=self.fail_mode, **extra)
+
+    def area(self, segmento, tipo):
+        """Área del equipo para la telemetría (ver 'areas' en empresa_xyz.yaml)."""
+        areas = self.cfg.get("areas", {})
+        if segmento == "administracion" and tipo in areas.get("por_tipo", {}):
+            return areas["por_tipo"][tipo]
+        return areas.get("por_segmento", {}).get(segmento, segmento)
 
     def router(self, nombre):
         r = self.net.addHost(nombre, cls=Router, ip=None)
@@ -146,6 +160,7 @@ class EmpresaXYZ:
             "nombre": nombre, "sede_id": ctx["sid"], "sede": ctx["sede"],
             "segmento": ctx["seg"], "tipo": tipo, "ip": ip,
             "gateway": f"{ctx['base']}.1", "detalle": detalle,
+            "area": self.area(ctx["seg"], tipo),
         })
 
     def acceso(self, sid, r_sede, rop, mbps, ms):
@@ -158,6 +173,10 @@ class EmpresaXYZ:
         # Puerto hacia el operador = subida de la sede; hacia la sede = bajada.
         self.puertos_acceso.append((sw.name, l_op.intf2.name, mbps, "subida"))
         self.puertos_acceso.append((sw.name, l_se.intf2.name, mbps, "bajada"))
+        puertos = getattr(sw, "ports", {})       # interfaz -> número de puerto OpenFlow
+        self.acc[sw.name] = {"sede_id": sid, "mbps": mbps,
+                             "puerto_operador": puertos.get(l_op.intf2, ""),
+                             "puerto_sede": puertos.get(l_se.intf2, "")}
         self.retardos.append((rop, f"rop-s{sid}", ms))
         self.retardos.append((r_sede, f"r{sid}-acc", ms))
 
@@ -231,7 +250,7 @@ class EmpresaXYZ:
             self.inventario.append({
                 "nombre": s["nombre"], "sede_id": "inet", "sede": "Internet",
                 "segmento": "internet", "tipo": s["servicio"], "ip": s["ip"],
-                "gateway": "203.0.113.1", "detalle": "",
+                "gateway": "203.0.113.1", "detalle": "", "area": "Internet",
             })
 
     def construir(self):
@@ -240,6 +259,37 @@ class EmpresaXYZ:
         for s in self.cfg["salas"]:
             self.sala(s, rop)
         self.internet(rop)
+        # Se escriben antes de arrancar: Ryu los necesita cuando los switches se conectan.
+        self.guardar_inventario()
+        self.guardar_switches()
+
+    def guardar_inventario(self):
+        with open(INVENTARIO, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(self.inventario[0].keys()))
+            w.writeheader()
+            w.writerows(self.inventario)
+
+    def guardar_switches(self):
+        """Rol de cada switch para el controlador: acceso, segmento, isla o internet."""
+        filas = []
+        for nombre, n in self.dpids.items():
+            if nombre in self.acc:
+                a = self.acc[nombre]
+                filas.append({"nombre": nombre, "dpid": n, "tipo": "acceso", "sede_id": a["sede_id"],
+                              "puerto_operador": a["puerto_operador"], "puerto_sede": a["puerto_sede"],
+                              "mbps": a["mbps"]})
+                continue
+            if nombre == "swinet":
+                tipo, sede = "internet", ""
+            else:
+                tipo = "isla" if "is" in nombre[3:] else "segmento"
+                sede = nombre[2]
+            filas.append({"nombre": nombre, "dpid": n, "tipo": tipo, "sede_id": sede,
+                          "puerto_operador": "", "puerto_sede": "", "mbps": ""})
+        with open(SWITCHES, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(filas[0].keys()))
+            w.writeheader()
+            w.writerows(filas)
 
     # ---------------- configuración tras arrancar ----------------
     def configurar(self, firewall=False, estrategia="sin_qos", burst_ms=BURST_MS_DEFECTO,
@@ -274,10 +324,17 @@ class EmpresaXYZ:
             rop.cmd("iptables -A FORWARD -i rop-inet -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT")
             rop.cmd("iptables -A FORWARD -i rop-inet -d 10.0.0.0/8 -j DROP")
 
-        with open(INVENTARIO, "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(self.inventario[0].keys()))
-            w.writeheader()
-            w.writerows(self.inventario)
+        if self.datapath == "user":
+            # El datapath de usuario de Open vSwitch no acepta los paquetes gigantes
+            # que arman las tarjetas virtuales (TSO/GSO): sin esto, TCP no pasa.
+            for h in self.net.hosts:
+                for intf in h.intfList():
+                    if intf.name != "lo":
+                        h.cmd(f"ethtool -K {intf.name} tx off tso off gso off gro off")
+            for sw in self.net.switches:
+                for intf in sw.intfList():
+                    if intf.name != "lo":
+                        sh(f"ethtool -K {intf.name} tx off tso off gso off gro off")
 
     def resumen(self):
         info(f"\n*** {self.cfg['empresa']}: {len(self.inventario)} equipos, "
@@ -357,6 +414,8 @@ def main():
                    help="bloquea conexiones iniciadas desde Internet")
     p.add_argument("--ip-controlador", default="127.0.0.1")
     p.add_argument("--puerto-controlador", type=int, default=6633)
+    p.add_argument("--datapath", choices=("kernel", "user"), default="kernel",
+                   help="user: Open vSwitch sin módulo del núcleo (solo para pruebas)")
     p.add_argument("--estrategia", choices=ESTRATEGIAS, default="sin_qos",
                    help="sin_qos = una cola (línea base); colas = una cola por clase")
     p.add_argument("--burst-ms", type=float, default=BURST_MS_DEFECTO,
@@ -383,7 +442,8 @@ def main():
 
     setLogLevel("info")
     emp = EmpresaXYZ(cfg, controlador=not args.sin_controlador,
-                     ip_ctrl=args.ip_controlador, puerto_ctrl=args.puerto_controlador)
+                     ip_ctrl=args.ip_controlador, puerto_ctrl=args.puerto_controlador,
+                     datapath=args.datapath)
     emp.construir()
     emp.net.start()
     try:
