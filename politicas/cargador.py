@@ -29,6 +29,7 @@ SEGMENTOS_TOPOLOGIA = {"servidores", "maquinas", "administracion", "pagos", "cct
                        "wifi_personal", "wifi_clientes", "internet"}
 CONDICIONES = {"segmento", "tipo", "servicio"}
 OBJETIVOS_REQUERIDOS = {"jitter_ms", "perdida_pct", "latencia_p95_ms", "mos_min"}
+MAX_COLA = 7   # HTB en Open vSwitch admite más, pero 8 colas sobran para 6 clases
 
 
 class PoliticaInvalida(ValueError):
@@ -87,7 +88,7 @@ class Politicas:
             if not isinstance(v, (int, float)) or v <= 0:
                 errores.append(f"el objetivo '{k}' debe ser un número positivo")
 
-        nombres, prioridades, suma = set(), set(), 0.0
+        nombres, prioridades, colas, suma = set(), set(), {}, 0.0
         for c in d["clases"]:
             n = c.get("nombre", "?")
             if n in nombres:
@@ -96,6 +97,13 @@ class Politicas:
             if c.get("prioridad") in prioridades:
                 errores.append(f"prioridad {c.get('prioridad')} repetida (clase '{n}')")
             prioridades.add(c.get("prioridad"))
+            q = c.get("cola")
+            if not isinstance(q, int) or isinstance(q, bool) or not 0 <= q <= MAX_COLA:
+                errores.append(f"clase '{n}': cola debe ser un entero entre 0 y {MAX_COLA}")
+            elif q in colas:
+                errores.append(f"cola {q} repetida (clases '{colas[q]}' y '{n}')")
+            else:
+                colas[q] = n
             g, t = c.get("garantia_pct"), c.get("techo_pct")
             if not isinstance(g, (int, float)) or g <= 0:
                 errores.append(f"clase '{n}': garantia_pct debe ser mayor que 0 (HTB lo exige)")
@@ -114,6 +122,10 @@ class Politicas:
                 errores.append(f"servicio '{s}' apunta a una clase inexistente: '{clase}'")
         if "desconocido" not in d["servicios_por_defecto"]:
             errores.append("servicios_por_defecto debe incluir 'desconocido'")
+        elif colas and colas.get(0) != d["servicios_por_defecto"]["desconocido"]:
+            errores.append(f"la cola 0 recibe el tráfico no clasificado: debe ser la clase de "
+                           f"'desconocido' ('{d['servicios_por_defecto']['desconocido']}'), "
+                           f"no '{colas.get(0, 'ninguna')}'")
         for tipo, s in (d.get("servicios_internos") or {}).items():
             if s not in servicios_conocidos:
                 errores.append(f"servicios_internos: '{tipo}' usa un servicio sin clase por defecto: '{s}'")
@@ -169,6 +181,16 @@ class Politicas:
         return {c["nombre"]: (int(bps * c["garantia_pct"] / 100), int(bps * c["techo_pct"] / 100))
                 for c in self.clases}
 
+    def cola(self, clase: str) -> int:
+        """Número de cola de Open vSwitch de una clase (para set_queue)."""
+        return self.por_nombre[clase]["cola"]
+
+    def clase_de_cola(self, cola: int) -> str:
+        for c in self.clases:
+            if c["cola"] == cola:
+                return c["nombre"]
+        raise KeyError(f"no hay clase en la cola {cola}")
+
 
 def _coincide(condicion, valor) -> bool:
     return condicion is None or valor in _lista(condicion)
@@ -189,11 +211,12 @@ def main():
     o = pol.objetivos
     print(f"Políticas válidas. Objetivos: jitter < {o['jitter_ms']} ms, pérdida < {o['perdida_pct']} %, "
           f"latencia p95 < {o['latencia_p95_ms']} ms, MOS >= {o['mos_min']}\n")
-    print(f"  {'Clase':12s} {'Prio':>4s} {'Garantía':>9s} {'Techo':>6s}   10 Mbps (rate/ceil)   30 Mbps (rate/ceil)")
+    print(f"  {'Clase':12s} {'Cola':>4s} {'Prio':>4s} {'Garantía':>9s} {'Techo':>6s}   "
+          f"10 Mbps (rate/ceil)   30 Mbps (rate/ceil)")
     t10, t30 = pol.tasas(10), pol.tasas(30)
     for c in pol.clases:
         n = c["nombre"]
-        print(f"  {n:12s} {c['prioridad']:>4d} {c['garantia_pct']:>8g}% {c['techo_pct']:>5g}%   "
+        print(f"  {n:12s} {c['cola']:>4d} {c['prioridad']:>4d} {c['garantia_pct']:>8g}% {c['techo_pct']:>5g}%   "
               f"{t10[n][0] / 1e6:5.1f} / {t10[n][1] / 1e6:5.1f} Mbps     {t30[n][0] / 1e6:5.1f} / {t30[n][1] / 1e6:5.1f} Mbps")
     print("\n  Ejemplos de clasificación:")
     ejemplos = [

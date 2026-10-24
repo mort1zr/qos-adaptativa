@@ -6,6 +6,7 @@ a la red de un mismo operador.
 Uso (con sudo y el Python del sistema, NO el del .venv):
   sudo python3 topologia/empresa_xyz.py                    # con Ryu (arrancarlo antes)
   sudo python3 topologia/empresa_xyz.py --verificar        # ping desde la oficina a todo
+  sudo python3 topologia/empresa_xyz.py --estrategia colas # 6 colas por clase en cada enlace
   sudo python3 topologia/empresa_xyz.py --sin-controlador  # prueba sin Ryu
 
 Diseño:
@@ -13,8 +14,11 @@ Diseño:
     Las tragamonedas se reparten en "islas", cada una con su switch.
   - Cada sede se conecta al router del operador (rop) por su enlace de acceso.
     Ese enlace pasa por un switch OVS propio (acc0..acc4) cuyos dos puertos
-    llevan una cola HTB: limita la capacidad en ambos sentidos. Ahí aplicará
-    la QoS el sistema en los siguientes sprints.
+    (subida y bajada) llevan QoS HTB que limita la capacidad:
+      sin_qos: una sola cola (línea base, por defecto).
+      colas:   una cola por clase de politicas.yaml (controlador/colas.py).
+    En una red real equivale a una VPN MPLS con clases de servicio: la sede
+    ordena lo que sube y el operador respeta las clases en lo que baja.
   - El operador también da salida a Internet (servidores 203.0.113.0/24).
   - El retardo se aplica con netem en las interfaces de los routers, nunca en
     los puertos OVS, para no pisar las colas HTB.
@@ -34,8 +38,19 @@ from mininet.net import Mininet
 from mininet.node import Node, OVSSwitch, RemoteController
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(AQUI))
+from controlador.colas import (BURST_MS_DEFECTO, HOJA_DEFECTO, ErrorColas,  # noqa: E402
+                              GestorColas, validar_hoja)
+
 CONFIG_DEFECTO = os.path.join(AQUI, "empresa_xyz.yaml")
 INVENTARIO = os.path.join(AQUI, "inventario.csv")
+ESTRATEGIAS = ("sin_qos", "colas")
+
+
+def hoja_por_defecto(estrategia):
+    """sin_qos representa una red sin gestionar: la FIFO larga de Linux (bufferbloat).
+    colas usa filas cortas por clase, como un router gestionado (HOJA_DEFECTO)."""
+    return HOJA_DEFECTO if estrategia == "colas" else "fifo"
 
 # segmento -> (octeto de red, código corto para nombres de switch/interfaz)
 SEGMENTOS = {
@@ -227,7 +242,8 @@ class EmpresaXYZ:
         self.internet(rop)
 
     # ---------------- configuración tras arrancar ----------------
-    def configurar(self, firewall=False):
+    def configurar(self, firewall=False, estrategia="sin_qos", burst_ms=BURST_MS_DEFECTO,
+                   hoja=None):
         # Sin IPv6: evita la ráfaga de mensajes automáticos (descubrimiento de
         # vecinos) que satura al controlador al arrancar y ensucia las mediciones.
         for h in self.net.hosts:
@@ -242,12 +258,16 @@ class EmpresaXYZ:
         for r, intf, ms in self.retardos:
             r.cmd(f"tc qdisc replace dev {intf} root netem delay {ms}ms")
 
-        # Línea base "sin QoS": una sola cola que solo limita la capacidad.
+        # QoS de los enlaces de acceso (ambos sentidos).
+        if estrategia not in ESTRATEGIAS:
+            raise ValueError(f"estrategia desconocida: {estrategia}")
+        self.estrategia = estrategia
+        self.colas = GestorColas(burst_ms=burst_ms, hoja=hoja or hoja_por_defecto(estrategia))
         for _, puerto, mbps, _ in self.puertos_acceso:
-            bps = int(mbps * 1_000_000)
-            sh(f"ovs-vsctl -- set port {puerto} qos=@q "
-               f"-- --id=@q create qos type=linux-htb other-config:max-rate={bps} queues:0=@q0 "
-               f"-- --id=@q0 create queue other-config:min-rate={bps} other-config:max-rate={bps}")
+            if estrategia == "colas":
+                self.colas.aplicar(puerto, mbps)      # una cola por clase
+            else:
+                self.colas.linea_base(puerto, mbps)   # una sola cola
 
         if firewall:
             # Desde Internet solo entran respuestas a conexiones iniciadas desde dentro.
@@ -267,9 +287,23 @@ class EmpresaXYZ:
             por_sede[f["sede"]] = por_sede.get(f["sede"], 0) + 1
         for sede, n in por_sede.items():
             info(f"    {sede:22s} {n:4d} equipos\n")
-        info("*** Enlaces de acceso (cola HTB única = línea base sin QoS)\n")
+        estrategia = getattr(self, "estrategia", "sin_qos")
+        detalle = ("una cola por clase" if estrategia == "colas"
+                   else "cola HTB única = línea base sin QoS")
+        if hasattr(self, "colas"):
+            detalle += f", fila de espera {self.colas.hoja}, ráfaga {self.colas.burst_ms:g} ms"
+        info(f"*** Enlaces de acceso: estrategia '{estrategia}' ({detalle})\n")
         for sw, puerto, mbps, sentido in self.puertos_acceso:
             info(f"    {sw:5s} {puerto:10s} {mbps:>3} Mbps {sentido}\n")
+        if estrategia == "colas":
+            info("*** Colas por enlace (garantía / techo, en % del enlace):\n")
+            for c in sorted(self.colas.pol.clases, key=lambda c: c["cola"]):
+                info(f"    cola {c['cola']}  {c['nombre']:12s} {c['garantia_pct']:>3g} % / "
+                     f"{c['techo_pct']:>3g} %   prioridad {c['prioridad']}\n")
+            ejemplo = next(p for sw, p, _, s in self.puertos_acceso
+                           if sw == "acc1" and s == "bajada")
+            info(f"    Ver un puerto (en otra terminal): "
+                 f"sudo python3 controlador/colas.py ver {ejemplo}\n")
         info(f"*** Inventario: {INVENTARIO}\n")
 
     def verificar(self, origen="ofsis1"):
@@ -308,6 +342,7 @@ class EmpresaXYZ:
     def limpiar(self):
         for _, puerto, _, _ in self.puertos_acceso:
             sh(f"ovs-vsctl --if-exists clear port {puerto} qos")
+        # QoS y Queue no se borran solas: se eliminan todas las de la emulación.
         sh("ovs-vsctl -- --all destroy QoS -- --all destroy Queue")
 
 
@@ -322,10 +357,22 @@ def main():
                    help="bloquea conexiones iniciadas desde Internet")
     p.add_argument("--ip-controlador", default="127.0.0.1")
     p.add_argument("--puerto-controlador", type=int, default=6633)
+    p.add_argument("--estrategia", choices=ESTRATEGIAS, default="sin_qos",
+                   help="sin_qos = una cola (línea base); colas = una cola por clase")
+    p.add_argument("--burst-ms", type=float, default=BURST_MS_DEFECTO,
+                   help="ráfaga HTB en ms, para las colas y la raíz (0 = la de Open vSwitch)")
+    p.add_argument("--cola-hoja", default=None,
+                   help="fila de espera de cada cola: fifo, pfifo:N o fq_codel "
+                        "(por defecto: fifo con sin_qos, pfifo:64 con colas)")
     args = p.parse_args()
 
     if os.geteuid() != 0:
         sys.exit("Ejecuta con sudo: sudo python3 topologia/empresa_xyz.py")
+    try:
+        if args.cola_hoja:
+            validar_hoja(args.cola_hoja)
+    except ErrorColas as e:
+        sys.exit(str(e))
 
     if not args.sin_controlador and not controlador_activo(args.ip_controlador,
                                                            args.puerto_controlador):
@@ -340,7 +387,8 @@ def main():
     emp.construir()
     emp.net.start()
     try:
-        emp.configurar(firewall=args.firewall)
+        emp.configurar(firewall=args.firewall, estrategia=args.estrategia,
+                       burst_ms=args.burst_ms, hoja=args.cola_hoja)
         emp.resumen()
         if args.verificar:
             emp.verificar()

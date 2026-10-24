@@ -21,33 +21,44 @@ objetivos:
 # Clases de tráfico = colas HTB en cada enlace de acceso.
 # Garantía y techo son % de la capacidad del enlace, así sirven para enlaces
 # de 10, 20, 30 o 50 Mbps. La suma de garantías no puede pasar de 100 %.
+#
+# "cola" es el número de cola en Open vSwitch (lo que usa set_queue). Es fijo
+# para que reordenar las clases no cambie a qué cola va cada flujo. La cola 0
+# recibe todo lo que no se clasificó, así que debe ser la clase de
+# "desconocido" (como la class-default de los routers Cisco).
 clases:
   - nombre: tiempo_real
+    cola: 1
     prioridad: 0           # 0 = la más alta
     garantia_pct: 15
     techo_pct: 40
     descripcion: "Voz y videollamadas: poca banda, la menor latencia posible"
   - nombre: critico
+    cola: 2
     prioridad: 1
     garantia_pct: 15
     techo_pct: 100
     descripcion: "Operación de máquinas, pagos con tarjeta y sorteos"
   - nombre: negocio
+    cola: 3
     prioridad: 2
     garantia_pct: 25
     techo_pct: 100
     descripcion: "ERP, música de la sala, IA generativa de Sistemas, archivos"
   - nombre: vigilancia
+    cola: 4
     prioridad: 3
     garantia_pct: 10
     techo_pct: 50
     descripcion: "Cámaras vistas en remoto desde la oficina"
   - nombre: masivo
+    cola: 0                # por defecto: lo no clasificado cae aquí
     prioridad: 4
     garantia_pct: 10
     techo_pct: 100
     descripcion: "Descargas, respaldos, actualizaciones, navegación general"
   - nombre: restringido
+    cola: 5
     prioridad: 5
     garantia_pct: 2
     techo_pct: 20

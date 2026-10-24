@@ -14,6 +14,7 @@ la calidad de una llamada VoIP
 Uso (Ryu corriendo en otra terminal):
   sudo python3 experimentos/prueba_congestion.py
   sudo python3 experimentos/prueba_congestion.py --sala 4 --duracion 30
+  sudo python3 experimentos/prueba_congestion.py --estrategia colas
 Resultados: experimentos/resultados/mediciones.csv
 """
 import argparse
@@ -28,7 +29,8 @@ AQUI = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(AQUI, "..", "topologia"))
 sys.path.insert(0, AQUI)
 
-from empresa_xyz import AVISO_RYU, CONFIG_DEFECTO, EmpresaXYZ, controlador_activo  # noqa: E402
+from empresa_xyz import (AVISO_RYU, BURST_MS_DEFECTO, CONFIG_DEFECTO, ESTRATEGIAS,  # noqa: E402
+                         EmpresaXYZ, controlador_activo)
 import medicion as m  # noqa: E402
 
 PUERTO_VOZ, PUERTO_VIDEO, PUERTO_BAJADA, PUERTO_SUBIDA = 5001, 5002, 5101, 5201
@@ -140,10 +142,14 @@ def imprimir(filas):
 
 
 def main():
-    p = argparse.ArgumentParser(description="Prueba de congestión sin QoS")
+    p = argparse.ArgumentParser(description="Prueba de congestión en una sala")
     p.add_argument("--sala", type=int, default=1, choices=[1, 2, 3, 4])
     p.add_argument("--duracion", type=int, default=20, help="segundos de medición por fase")
     p.add_argument("--sin-controlador", action="store_true")
+    p.add_argument("--estrategia", choices=ESTRATEGIAS, default="sin_qos")
+    p.add_argument("--burst-ms", type=float, default=BURST_MS_DEFECTO)
+    p.add_argument("--cola-hoja", default=None,
+                   help="fifo, pfifo:N o fq_codel (por defecto según la estrategia)")
     args = p.parse_args()
     if os.geteuid() != 0:
         sys.exit("Ejecuta con sudo")
@@ -158,7 +164,7 @@ def main():
     validar(emp, args.sala)
     emp.net.start()
     try:
-        emp.configurar()
+        emp.configurar(estrategia=args.estrategia, burst_ms=args.burst_ms, hoja=args.cola_hoja)
         info("*** Esperando 5 s a que la red se estabilice\n")
         time.sleep(5)
         s = f"sa{args.sala}"
@@ -168,7 +174,7 @@ def main():
         filas += fase(emp.net, args.sala, "sin_carga", False, args.duracion)
         filas += fase(emp.net, args.sala, "con_descargas", True, args.duracion)
         for f in filas:
-            f.update({"escenario": f"congestion_sala{args.sala}", "estrategia": "sin_qos"})
+            f.update({"escenario": f"congestion_sala{args.sala}", "estrategia": args.estrategia})
         imprimir(filas)
         info(f"\n*** Objetivos: jitter < {m.OBJETIVOS['jitter_ms']} ms, pérdida < "
              f"{m.OBJETIVOS['perdida_pct']} %, latencia p95 < {m.OBJETIVOS['latencia_ms']} ms, "

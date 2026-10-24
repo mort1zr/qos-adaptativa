@@ -74,6 +74,23 @@ class Validacion(unittest.TestCase):
         del d["servicios_por_defecto"]["pagos"]
         self.rechaza(d, "'pagos'")
 
+    def test_cola_repetida(self):
+        d = base()
+        d["clases"][1]["cola"] = d["clases"][0]["cola"]
+        self.rechaza(d, "repetida (clases")
+
+    def test_cola_fuera_de_rango(self):
+        d = base()
+        d["clases"][0]["cola"] = 9
+        self.rechaza(d, "cola debe ser un entero")
+
+    def test_cola_0_debe_ser_la_clase_por_defecto(self):
+        d = base()
+        masivo = next(c for c in d["clases"] if c["nombre"] == "masivo")
+        tiempo_real = next(c for c in d["clases"] if c["nombre"] == "tiempo_real")
+        masivo["cola"], tiempo_real["cola"] = tiempo_real["cola"], 0
+        self.rechaza(d, "la cola 0 recibe el tráfico no clasificado")
+
     def test_reporta_todos_los_errores_juntos(self):
         d = copy.deepcopy(base())
         d["clases"][0]["garantia_pct"] = 90
@@ -125,6 +142,12 @@ class Clasificacion(unittest.TestCase):
 
 
 class Tasas(unittest.TestCase):
+    def test_colas_de_cada_clase(self):
+        pol = cargar()
+        self.assertEqual(pol.cola("masivo"), 0)
+        self.assertEqual(pol.cola("tiempo_real"), 1)
+        self.assertEqual(pol.clase_de_cola(5), "restringido")
+
     def test_tasas_para_10_mbps(self):
         t = cargar().tasas(10)
         self.assertEqual(t["tiempo_real"], (1_500_000, 4_000_000))
