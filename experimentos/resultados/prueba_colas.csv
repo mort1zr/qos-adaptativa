@@ -1,0 +1,18 @@
+fecha,sala,prueba,variante,flujo,clase,cola,garantia_mbps,techo_mbps,mbps,latencia_ms,latencia_p95_ms,jitter_ms,perdida_pct,mos,criterio,cumple
+2026-10-23T22:34:44,1,aislamiento,sin_qos,voip,única,0,30,30,0.062,213.8,739.02,7.92,0.9,1.47,"objetivos de calidad (jitter < 30 ms, pérdida, p95, MOS)","no (latencia p95, MOS)"
+2026-10-23T22:34:44,1,aislamiento,sin_qos,videoconferencia,única,0,30,30,2.522,323.0,626.48,2.09,0.37,,"objetivos de calidad (jitter < 30 ms, pérdida, p95, MOS)",no (latencia p95)
+2026-10-23T22:34:44,1,aislamiento,sin_qos,descargas clientes (bajada),única,0,30,30,25.32,,,,,,-,-
+2026-10-23T22:34:44,1,aislamiento,sin_qos,respaldo a oficina (subida),única,0,30,30,16.03,,,,,,-,-
+2026-10-23T22:34:44,1,aislamiento,colas_sin_reglas,voip,masivo,0,3.0,30.0,0.064,14.84,40.39,1.45,0.1,4.38,"objetivos de calidad (jitter < 30 ms, pérdida, p95, MOS)",sí
+2026-10-23T22:34:44,1,aislamiento,colas_sin_reglas,videoconferencia,masivo,0,3.0,30.0,2.486,32.54,43.97,1.24,0.46,,"objetivos de calidad (jitter < 30 ms, pérdida, p95, MOS)",sí
+2026-10-23T22:34:44,1,aislamiento,colas_sin_reglas,descargas clientes (bajada),masivo,0,3.0,30.0,26.56,,,,,,-,-
+2026-10-23T22:34:44,1,aislamiento,colas_sin_reglas,respaldo a oficina (subida),masivo,0,3.0,30.0,22.95,,,,,,-,-
+2026-10-23T22:34:44,1,aislamiento,colas_con_reglas,voip,tiempo_real,1,4.5,12.0,0.064,10.25,11.48,0.75,0.0,4.4,"objetivos de calidad (jitter < 30 ms, pérdida, p95, MOS)",sí
+2026-10-23T22:34:44,1,aislamiento,colas_con_reglas,videoconferencia,tiempo_real,1,4.5,12.0,2.496,5.69,6.68,0.55,0.0,,"objetivos de calidad (jitter < 30 ms, pérdida, p95, MOS)",sí
+2026-10-23T22:34:44,1,aislamiento,colas_con_reglas,descargas clientes (bajada),masivo,0,3.0,30.0,26.26,,,,,,-,-
+2026-10-23T22:34:44,1,aislamiento,colas_con_reglas,respaldo a oficina (subida),masivo,0,3.0,30.0,23.29,,,,,,-,-
+2026-10-23T22:34:44,1,garantia,colas_con_reglas,udp al 90 % de la garantía,critico,2,4.5,30.0,3.917,10.21,11.49,0.7,0.0,,recibe su tasa con pérdida < 1 % (enlace saturado),sí
+2026-10-23T22:34:44,1,garantia,colas_con_reglas,respaldo tcp (subida),masivo,0,3.0,30.0,21.92,,,,,,-,-
+2026-10-23T22:34:44,1,prestamo,colas_sin_reglas,descarga tcp sola,masivo,0,3.0,30.0,28.71,,,,,,garantía < Mbps <= techo,sí
+2026-10-23T22:34:44,1,prestamo,colas_con_reglas,descarga tcp sola,tiempo_real,1,4.5,12.0,11.49,,,,,,garantía < Mbps <= techo,sí
+2026-10-23T22:34:44,1,prestamo,colas_con_reglas,descarga tcp sola,restringido,5,0.6,6.0,5.75,,,,,,garantía < Mbps <= techo,sí
