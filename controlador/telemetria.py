@@ -93,7 +93,12 @@ class Telemetria:
             local, remoto = d, o
         else:
             local, remoto = None, None
+        # El servicio lo define el lado que actúa como servidor: normalmente el otro
+        # extremo (Internet, la central); si ese no ofrece nada (p. ej. la PC de
+        # monitoreo que mira las cámaras), el servicio es el del equipo local (el NVR).
         servicio = self.pol.servicio_de(remoto) if remoto else "desconocido"
+        if servicio == "desconocido" and local:
+            servicio = self.pol.servicio_de(local)
         if local:
             clase, _ = self.pol.clasificar(local["segmento"], local["tipo"], servicio)
         else:

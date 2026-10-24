@@ -1,0 +1,167 @@
+# Perfiles de tráfico de la Empresa XYZ (historia PCIII-17).
+#
+# Cada perfil imita lo que hace un tipo de equipo en un día normal (intensidad 1).
+# Los escenarios (PCIII-18) suben o bajan la intensidad de cada perfil.
+#
+# Campos:
+#   sedes          salas | oficina | todas
+#   origen.tipo    tipos de equipo de topologia/inventario.csv que generan el tráfico
+#   destino        nombre: un equipo fijo  |  tipo: un tipo de equipo (p. ej. servidores de Internet)
+#   cantidad       cuántos equipos de origen participan por sede (se escala con la intensidad)
+#   transporte     tcp (todo por el puerto 443, como HTTPS) | udp (puerto al azar, como RTP)
+#   patron         tcp: descarga | subida | transacciones
+#   tasa / periodo transacciones por segundo al azar / cada cuántos segundos (fijo)
+#                  la intensidad escala la tasa (o acorta el periodo)
+#   tasa_por       maquinas: la tasa se multiplica por las máquinas de la sala
+#   peticion / respuesta  bytes por transacción (varían ±variacion)
+#   mbps / mbps_vuelta    udp: tasa de ida (origen -> destino) y de vuelta
+#   clase_esperada lo que debería asignar politicas.yaml (se verifica con la telemetría)
+#
+# Limitación declarada de la emulación: no todos los 276 equipos generan
+# tráfico; los perfiles eligen una muestra (cantidad) para no saturar la CPU de
+# la máquina virtual. Las tragamonedas se representan por el reporte agregado
+# que su servidor de sala envía a la oficina (lo que usa el enlace).
+
+variacion_defecto: 0.3
+
+perfiles:
+  maquinas_reporte:
+    descripcion: "Servidor de sala reporta a la central los eventos y contadores de las máquinas"
+    sedes: salas
+    origen: {tipo: [servidor_sala]}
+    destino: {nombre: ofcms}
+    cantidad: 1
+    transporte: tcp
+    patron: transacciones
+    tasa: 0.5                 # mensajes por segundo por máquina
+    tasa_por: maquinas
+    peticion: 400
+    respuesta: 100
+    clase_esperada: critico
+
+  pagos_pos:
+    descripcion: "Pagos con tarjeta: transacciones cortas, una conexión por pago"
+    sedes: salas
+    origen: {tipo: [pos]}
+    destino: {tipo: [pagos]}
+    cantidad: 2
+    transporte: tcp
+    patron: transacciones
+    tasa: 0.025               # un pago cada ~40 s por POS
+    nueva_conexion: true
+    peticion: 1500
+    respuesta: 3000
+    clase_esperada: critico
+
+  voip:
+    descripcion: "Llamada IP (G.711): 50 paquetes/s de 160 B en cada sentido"
+    sedes: salas
+    origen: {tipo: [telefono_ip]}
+    destino: {nombre: ofpbx}
+    cantidad: 1
+    transporte: udp
+    mbps: 0.0808
+    mbps_vuelta: 0.0808
+    largo: 160
+    variacion: 0.0
+    clase_esperada: tiempo_real
+
+  videollamada:
+    descripcion: "Videollamada HD: ~2.5 Mbps de bajada y ~1.5 Mbps de subida"
+    sedes: todas
+    origen: {tipo: [pc_caja, pc_gerencia]}
+    destino: {nombre: inetvc}
+    cantidad: 1
+    transporte: udp
+    mbps: 1.5
+    mbps_vuelta: 2.5
+    largo: 1200
+    variacion: 0.15
+    clase_esperada: tiempo_real
+
+  musica_sala:
+    descripcion: "PC de música con YouTube todo el día: segmentos de video cada 4 s (~1 Mbps)"
+    sedes: salas
+    origen: {tipo: [pc_musica]}
+    destino: {tipo: [streaming]}
+    cantidad: 1
+    transporte: tcp
+    patron: transacciones
+    periodo: 4
+    peticion: 600
+    respuesta: 500000
+    variacion: 0.2
+    clase_esperada: negocio
+
+  camara_remota:
+    descripcion: "Cámaras de la sala vistas en vivo desde la PC de monitoreo de la oficina"
+    sedes: salas
+    origen: {tipo: [nvr]}
+    destino: {nombre: ofmon}
+    cantidad: 2               # transmisiones simultáneas desde el NVR de cada sala
+    permite_repetir: true     # varias transmisiones desde el mismo NVR
+    transporte: udp
+    mbps: 1.5
+    largo: 1200
+    variacion: 0.2
+    clase_esperada: vigilancia
+
+  ia_generativa:
+    descripcion: "Área de Sistemas consultando IA generativa: preguntas cortas, respuestas largas"
+    sedes: oficina
+    origen: {tipo: [pc_sistemas]}
+    destino: {tipo: [ia_generativa]}
+    cantidad: 2
+    transporte: tcp
+    patron: transacciones
+    tasa: 0.067               # una consulta cada ~15 s
+    peticion: 3000
+    respuesta: 40000
+    clase_esperada: negocio
+
+  navegacion:
+    descripcion: "Navegación web del personal administrativo"
+    sedes: oficina
+    origen: {tipo: [pc_gerencia, pc_contabilidad, pc_rrhh, pc_operaciones, pc_secretaria]}
+    destino: {tipo: [navegacion]}
+    cantidad: 4
+    transporte: tcp
+    patron: transacciones
+    tasa: 0.08                # una página cada ~12 s
+    peticion: 800
+    respuesta: 150000
+    clase_esperada: masivo
+
+  descargas:
+    descripcion: "Descarga grande (actualización de software): TCP elástico, usa todo lo que puede"
+    sedes: todas
+    origen: {tipo: [pc_operaciones, pc_caja]}
+    destino: {tipo: [descargas]}
+    cantidad: 1
+    transporte: tcp
+    patron: descarga
+    clase_esperada: masivo
+
+  respaldo:
+    descripcion: "Respaldo del servidor de sala hacia la oficina: TCP elástico de subida"
+    sedes: salas
+    origen: {tipo: [servidor_sala]}
+    destino: {nombre: ofbak}
+    cantidad: 1
+    transporte: tcp
+    patron: subida
+    clase_esperada: masivo
+
+  wifi_clientes:
+    descripcion: "Clientes en el WiFi de la sala viendo videos: segmentos de 1 MB cada 4 s (~2 Mbps c/u)"
+    sedes: salas
+    origen: {tipo: [cliente_wifi]}
+    destino: {tipo: [streaming]}
+    cantidad: 3
+    transporte: tcp
+    patron: transacciones
+    periodo: 4
+    peticion: 600
+    respuesta: 1000000
+    variacion: 0.25
+    clase_esperada: restringido

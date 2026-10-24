@@ -17,6 +17,8 @@ INVENTARIO = """nombre,sede_id,sede,segmento,tipo,ip,gateway,detalle,area
 ofcon1,0,Oficina central,administracion,pc_contabilidad,10.0.20.11,10.0.20.1,,Contabilidad
 ofcon2,0,Oficina central,administracion,pc_contabilidad,10.0.20.12,10.0.20.1,,Contabilidad
 ofpbx,0,Oficina central,servidores,central_telefonica,10.0.10.14,10.0.10.1,,Servidores
+ofmon,0,Oficina central,administracion,pc_monitoreo,10.0.20.18,10.0.20.1,,Monitoreo
+sa1nvr,1,Sala 1,cctv,nvr,10.1.40.10,10.1.40.1,,Cámaras
 sa1tel,1,Sala 1,administracion,telefono_ip,10.1.20.13,10.1.20.1,,Telefonía
 sa1cli1,1,Sala 1,wifi_clientes,cliente_wifi,10.1.60.10,10.1.60.1,AP1,WiFi clientes
 inetupd,inet,Internet,internet,descargas,203.0.113.40,203.0.113.1,,Internet
@@ -68,6 +70,15 @@ class Telemetria_(unittest.TestCase):
         en_oficina = self.tel.registrar_flujos(5, [muestra("10.1.20.13", "10.0.10.14", 1, 8000, duracion=1)], ts=10)[0]
         self.assertEqual((en_oficina["area"], en_oficina["clase"], en_oficina["sentido"]),
                          ("Servidores", "tiempo_real", "bajada"))
+
+    def test_camaras_vistas_desde_la_oficina_en_ambos_extremos(self):
+        # En la sala el otro extremo es la PC de monitoreo (no ofrece servicio):
+        # el servicio sale del equipo local, el NVR (cctv).
+        en_sala = self.tel.registrar_flujos(15, [muestra("10.1.40.10", "10.0.20.18", 2, 10_000, duracion=1)], ts=1)[0]
+        self.assertEqual((en_sala["area"], en_sala["servicio"], en_sala["clase"]), ("Cámaras", "cctv", "vigilancia"))
+        en_oficina = self.tel.registrar_flujos(5, [muestra("10.1.40.10", "10.0.20.18", 1, 10_000, duracion=1)], ts=1)[0]
+        self.assertEqual((en_oficina["area"], en_oficina["servicio"], en_oficina["clase"]),
+                         ("Monitoreo", "cctv", "vigilancia"))
 
     def test_wifi_de_clientes_restringido(self):
         f = self.tel.registrar_flujos(15, [muestra("203.0.113.30", "10.1.60.10", 1, 10_000, duracion=1)], ts=1)[0]
