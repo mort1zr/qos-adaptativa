@@ -53,6 +53,19 @@ perfiles:
     respuesta: 3000
     clase_esperada: critico
 
+  sorteo_pc:
+    descripcion: "PC de sorteos con el sistema central: cupones y resultados (fuerte durante un sorteo)"
+    sedes: salas
+    origen: {tipo: [pc_sorteos]}
+    destino: {nombre: ofcms}
+    cantidad: 1
+    transporte: tcp
+    patron: transacciones
+    tasa: 0.2
+    peticion: 2000
+    respuesta: 1500
+    clase_esperada: critico
+
   voip:
     descripcion: "Llamada IP (G.711): 50 paquetes/s de 160 B en cada sentido"
     sedes: salas

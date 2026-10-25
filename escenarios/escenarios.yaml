@@ -1,0 +1,110 @@
+# Escenarios de la Empresa XYZ (historia PCIII-18).
+#
+# Cada escenario es una situación de una sala, dividida en fases. En cada fase
+# se indica la intensidad de cada perfil de trafico/perfiles.yaml (1 = un día
+# normal; lo que no aparece, no genera tráfico) para la sala y para la oficina.
+#
+# Reloj simulado: cada escenario empieza en un día y una hora de la semana y el
+# tiempo corre 'factor' veces más rápido (12: 10 minutos reales = 2 horas).
+# Así el sistema puede "ver" la hora y el día (lo usará el predictor del
+# Sprint 4). La semana de referencia es la del lunes 2 de noviembre de 2026.
+#
+# Uso: python3 escenarios/escenario.py --nombre sorteo --estrategia fila_corta --sala 1
+
+reloj:
+  factor: 12
+
+# Sondas de medición en cada fase (además del tráfico de los perfiles):
+#   voz:   llamada entre el teléfono de la sala y la central, en los dos sentidos
+#          (latencia, jitter, pérdida y MOS; se evalúa por el peor sentido)
+#   pagos: un POS de la sala cobrando cada 2 s (tiempo de respuesta de cada pago)
+sondas:
+  voz: true
+  pagos: {periodo_s: 2, peticion: 1500, respuesta: 3000}
+
+# Objetivo de los pagos (los de la voz están en politicas/politicas.yaml)
+objetivos:
+  pagos_p95_ms: 500
+
+escenarios:
+  apertura:
+    descripcion: >-
+      08:00. Arrancan las máquinas y reportan a la central, se sincroniza la
+      jornada y llegan las actualizaciones de software del día.
+    inicio: {dia: lunes, hora: "07:50"}
+    fases:
+      - nombre: previa
+        duracion_s: 30
+        sala: {maquinas_reporte: 0.2, camara_remota: 0.5}
+      - nombre: arranque
+        duracion_s: 60
+        sala: {maquinas_reporte: 3, sorteo_pc: 1, pagos_pos: 0.5, musica_sala: 1,
+               camara_remota: 1, descargas: 1}
+        oficina: {navegacion: 0.5}
+      - nombre: estable
+        duracion_s: 30
+        sala: {maquinas_reporte: 1, pagos_pos: 1, musica_sala: 1, camara_remota: 1,
+               wifi_clientes: 0.3}
+        oficina: {navegacion: 1, ia_generativa: 1}
+
+  sorteo:
+    descripcion: >-
+      Sábado por la noche, sorteo en día y hora fijos: la PC de sorteos y los
+      pagos con tarjeta se disparan con la sala llena.
+    inicio: {dia: sabado, hora: "20:50"}
+    fases:
+      - nombre: previa
+        duracion_s: 30
+        sala: {maquinas_reporte: 1.5, sorteo_pc: 1, pagos_pos: 1.5, musica_sala: 1,
+               camara_remota: 1, wifi_clientes: 1}
+      - nombre: sorteo
+        duracion_s: 60
+        sala: {maquinas_reporte: 2, sorteo_pc: 8, pagos_pos: 4, musica_sala: 1,
+               camara_remota: 2, wifi_clientes: 1.5}
+      - nombre: posterior
+        duracion_s: 30
+        sala: {maquinas_reporte: 1.5, sorteo_pc: 1, pagos_pos: 2, musica_sala: 1,
+               camara_remota: 1, wifi_clientes: 1}
+
+  noche_alta:
+    descripcion: >-
+      Sábado 22:30, la hora más concurrida: WiFi de clientes al tope, cámaras en
+      vivo desde la oficina, pagos frecuentes y música.
+    inicio: {dia: sabado, hora: "22:30"}
+    fases:
+      - nombre: pico
+        duracion_s: 90
+        sala: {maquinas_reporte: 1.5, sorteo_pc: 1, pagos_pos: 2, musica_sala: 1,
+               camara_remota: 2, wifi_clientes: 4}    # ~25 Mbps de WiFi: llena la Sala 1
+
+  respaldo_en_atencion:
+    descripcion: >-
+      Miércoles 15:00. Un respaldo y una descarga grande que NO deberían correr
+      en horario de atención (situación inusual que el sistema debe detectar).
+    inicio: {dia: miercoles, hora: "15:00"}
+    fases:
+      - nombre: normal
+        duracion_s: 30
+        sala: {maquinas_reporte: 1, pagos_pos: 1, musica_sala: 1, camara_remota: 1,
+               wifi_clientes: 0.5}
+        oficina: {navegacion: 1, ia_generativa: 1}
+      - nombre: respaldo
+        duracion_s: 60
+        sala: {maquinas_reporte: 1, pagos_pos: 1, musica_sala: 1, camara_remota: 1,
+               wifi_clientes: 0.5, respaldo: 1, descargas: 1}
+        oficina: {navegacion: 1, ia_generativa: 1}
+      - nombre: normal_otra_vez
+        duracion_s: 30
+        sala: {maquinas_reporte: 1, pagos_pos: 1, musica_sala: 1, camara_remota: 1,
+               wifi_clientes: 0.5}
+        oficina: {navegacion: 1, ia_generativa: 1}
+
+  madrugada:
+    descripcion: >-
+      Martes 04:00, sala cerrada (3:00-8:00): casi sin uso, así que los
+      respaldos y las descargas pueden usar todo el enlace.
+    inicio: {dia: martes, hora: "04:00"}
+    fases:
+      - nombre: valle
+        duracion_s: 90
+        sala: {camara_remota: 0.5, respaldo: 1, descargas: 1}

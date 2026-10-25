@@ -21,7 +21,8 @@ Modos:
         transacciones   peticiones de --peticion bytes y respuestas de
                         --respuesta bytes, con llegadas al azar (--tasa por s)
                         o fijas (--periodo s); --nueva-conexion para abrir y
-                        cerrar en cada una (como un POS)
+                        cerrar en cada una (como un POS); --salida guarda en
+                        JSON cuánto tardó cada una (p50, p95, máximo)
   udp       --destino IP --puerto P --mbps X --largo B [--variacion 0.2]
         flujo UDP de tasa casi constante (voz, video, cámaras)
   sumidero  --puerto P
@@ -31,6 +32,7 @@ Todos aceptan --duracion y --semilla (mismo azar en cada corrida).
 Compatible con Python 3.9.
 """
 import argparse
+import json
 import random
 import socket
 import socketserver
@@ -128,11 +130,28 @@ def variar(rng, valor, variacion):
     return max(1, int(valor * rng.uniform(1 - variacion, 1 + variacion)))
 
 
+def resumen_tiempos(tiempos_ms, errores=0):
+    """p50, p95 y máximo de los tiempos de respuesta (ms)."""
+    if not tiempos_ms:
+        return {"transacciones": 0, "errores": errores}
+    orden = sorted(tiempos_ms)
+    pct = lambda q: orden[min(len(orden) - 1, int(q * len(orden)))]  # noqa: E731
+    return {"transacciones": len(orden), "errores": errores, "p50_ms": round(pct(0.5), 1),
+            "p95_ms": round(pct(0.95), 1), "max_ms": round(orden[-1], 1)}
+
+
 def cliente(destino, puerto, patron, duracion, peticion=1000, respuesta=10000, tasa=None,
-            periodo=None, nueva_conexion=False, variacion=0.3, semilla=1):
+            periodo=None, nueva_conexion=False, variacion=0.3, semilla=1, salida=None):
     rng = random.Random(semilla)
     fin = time.time() + duracion
-    s = None if nueva_conexion else conectar(destino, puerto)
+    tiempos, errores = [], 0
+    try:
+        s = None if nueva_conexion else conectar(destino, puerto)
+    except ConnectionError:
+        s, errores = None, 1
+        if not nueva_conexion:
+            _guardar(salida, resumen_tiempos(tiempos, errores))
+            return 0
     hechas = 0
     try:
         if patron in ("descarga", "subida"):
@@ -155,13 +174,20 @@ def cliente(destino, puerto, patron, duracion, peticion=1000, respuesta=10000, t
             if espera > 0:
                 time.sleep(espera)
             n, m = variar(rng, peticion, variacion), variar(rng, respuesta, variacion)
-            con = conectar(destino, puerto) if nueva_conexion else s
-            con.sendall(CABECERA.pack(b"T", n, m))
-            _enviar(con, n)
-            _descartar(con, m)
-            if nueva_conexion:
-                con.close()
-            hechas += 1
+            t0 = time.time()
+            try:
+                con = conectar(destino, puerto, intentos=3) if nueva_conexion else s
+                con.sendall(CABECERA.pack(b"T", n, m))
+                _enviar(con, n)
+                _descartar(con, m)
+                if nueva_conexion:
+                    con.close()
+                tiempos.append((time.time() - t0) * 1000)
+                hechas += 1
+            except (ConnectionError, OSError):
+                errores += 1
+                if not nueva_conexion:
+                    raise
             proxima += rng.expovariate(tasa) if tasa else periodo
         return hechas
     except (ConnectionError, OSError):
@@ -169,6 +195,13 @@ def cliente(destino, puerto, patron, duracion, peticion=1000, respuesta=10000, t
     finally:
         if s:
             s.close()
+        _guardar(salida, resumen_tiempos(tiempos, errores))
+
+
+def _guardar(salida, datos):
+    if salida:
+        with open(salida, "w") as f:
+            json.dump(datos, f)
 
 
 # ---------------- UDP ----------------
@@ -228,6 +261,7 @@ def main():
     p.add_argument("--variacion", type=float, default=0.3)
     p.add_argument("--mbps", type=float, default=1.0)
     p.add_argument("--largo", type=int, default=1200)
+    p.add_argument("--salida", help="cliente: archivo JSON con los tiempos de respuesta")
     a = p.parse_args()
     if a.modo == "servidor":
         servidor(a.puerto, a.duracion)
@@ -235,7 +269,7 @@ def main():
         if a.patron == "transacciones" and not (a.tasa or a.periodo):
             sys.exit("transacciones necesita --tasa o --periodo")
         cliente(a.destino, a.puerto, a.patron, a.duracion, a.peticion, a.respuesta, a.tasa,
-                a.periodo, a.nueva_conexion, a.variacion, a.semilla)
+                a.periodo, a.nueva_conexion, a.variacion, a.semilla, a.salida)
     elif a.modo == "udp":
         udp(a.destino, a.puerto, a.mbps, a.largo, a.duracion, a.variacion, a.semilla)
     else:

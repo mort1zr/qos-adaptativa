@@ -31,6 +31,7 @@ def inventario():
         ("sa1caja", 1, "administracion", "pc_caja", "10.1.20.10"),
         ("sa1musica", 1, "administracion", "pc_musica", "10.1.20.11"),
         ("sa1tel", 1, "administracion", "telefono_ip", "10.1.20.13"),
+        ("sa1sort", 1, "administracion", "pc_sorteos", "10.1.20.12"),
         ("sa1pos1", 1, "pagos", "pos", "10.1.30.10"),
         ("sa1pos2", 1, "pagos", "pos", "10.1.30.11"),
         ("sa1nvr", 1, "cctv", "nvr", "10.1.40.10"),
@@ -167,6 +168,31 @@ class Aplicaciones(unittest.TestCase):
         t.join()
         self.assertGreater(enviados, 90)                       # ~100 paquetes/s a 1 Mbps
         self.assertGreaterEqual(resultado["n"], enviados * 0.95)
+
+    def test_tiempos_de_respuesta_en_json(self):
+        import json
+        import os
+        import tempfile
+        ruta = os.path.join(tempfile.mkdtemp(), "t.json")
+        ap.cliente("127.0.0.1", self.puerto, "transacciones", 1.05, peticion=1500, respuesta=3000,
+                   periodo=0.1, nueva_conexion=True, semilla=2, salida=ruta)
+        with open(ruta) as f:
+            r = json.load(f)
+        self.assertGreaterEqual(r["transacciones"], 9)
+        self.assertEqual(r["errores"], 0)
+        self.assertLessEqual(r["p50_ms"], r["p95_ms"])
+
+    def test_servidor_caido_cuenta_errores(self):
+        import json
+        import os
+        import tempfile
+        ruta = os.path.join(tempfile.mkdtemp(), "t.json")
+        ap.cliente("127.0.0.1", puerto_libre(), "transacciones", 0.5, periodo=0.1,
+                   nueva_conexion=True, salida=ruta)
+        with open(ruta) as f:
+            r = json.load(f)
+        self.assertEqual(r["transacciones"], 0)
+        self.assertGreater(r["errores"], 0)
 
     def test_variacion_reproducible(self):
         import random
