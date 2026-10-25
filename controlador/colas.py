@@ -89,6 +89,24 @@ def _mapa(texto: str) -> Dict[str, str]:
     return pares
 
 
+def leer_contadores_tc(salida: str) -> Dict[int, dict]:
+    """Interpreta 'tc -s class show dev P': {cola: {bytes, paquetes, descartes}}.
+    La cola Q de Open vSwitch es la clase 1:(Q+1) en hexadecimal; la raíz 1:fffe se omite."""
+    colas, actual = {}, None
+    for linea in salida.splitlines():
+        partes = linea.split()
+        if len(partes) >= 3 and partes[0] == "class" and partes[1] == "htb":
+            menor = partes[2].partition(":")[2]
+            actual = None if menor == "fffe" else int(menor, 16) - 1
+        elif actual is not None and partes[:1] == ["Sent"] and len(partes) >= 4:
+            descartes = 0
+            if "(dropped" in partes:
+                descartes = int(partes[partes.index("(dropped") + 1].rstrip(","))
+            colas[actual] = {"bytes": int(partes[1]), "paquetes": int(partes[3]), "descartes": descartes}
+            actual = None
+    return colas
+
+
 def validar_hoja(hoja: str) -> str:
     if hoja in ("fifo", "fq_codel"):
         return hoja
@@ -270,6 +288,11 @@ class GestorColas:
             if linea.startswith("Sent "):
                 return int(linea.split()[1])
         raise ErrorColas(f"no se encontró la clase 1:fffe en {puerto}")
+
+    def contadores_colas(self, puerto: str) -> Dict[int, dict]:
+        """Bytes, paquetes y descartes de cada cola del puerto (clases 1:N de HTB; la
+        cola Q es la clase 1:(Q+1)). Sirve para ver en qué cola cayó el tráfico."""
+        return leer_contadores_tc(self._ejecutar(["tc", "-s", "class", "show", "dev", puerto]))
 
     def leer(self, puerto: str) -> Optional[dict]:
         """Estado actual de la QoS del puerto, o None si no tiene."""

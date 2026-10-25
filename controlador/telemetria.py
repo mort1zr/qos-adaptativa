@@ -16,10 +16,13 @@ contadores. El detalle por flujo identifica equipos y se borra pasadas
 No depende de Ryu: se prueba con controlador/test_telemetria.py.
 Compatible con Python 3.9.
 """
+import math
 import os
 import sqlite3
 import time
 from typing import Dict, List, Optional, Tuple
+
+from controlador.clasificadores import PorPolitica, armar_flujo
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_DEFECTO = os.path.join(RAIZ, "datos", "telemetria.db")
@@ -29,7 +32,7 @@ CONFIG = os.path.join(RAIZ, "controlador", "telemetria.yaml")
 def leer_config(ruta: str = CONFIG) -> dict:
     """Configuración de la telemetría (controlador/telemetria.yaml) con valores por defecto."""
     cfg = {"intervalo_s": 5, "idle_timeout_s": 30, "retencion_flujos_h": 24,
-           "base_datos": "datos/telemetria.db"}
+           "base_datos": "datos/telemetria.db", "clasificador": "ninguno"}
     if os.path.exists(ruta):
         import yaml
         with open(ruta) as f:
@@ -55,7 +58,14 @@ CREATE TABLE IF NOT EXISTS enlaces (
 CREATE INDEX IF NOT EXISTS enlaces_ts ON enlaces(ts);
 CREATE TABLE IF NOT EXISTS sondeos (ts REAL, sede_id INTEGER, segundos REAL);
 CREATE INDEX IF NOT EXISTS sondeos_ts ON sondeos(ts);
+CREATE TABLE IF NOT EXISTS decisiones (
+    ts REAL, dpid INTEGER, sede_id INTEGER, sentido TEXT, origen_ip TEXT, destino_ip TEXT,
+    proto INTEGER, origen TEXT, destino TEXT, area TEXT, clasificador TEXT, clase TEXT,
+    cola INTEGER, motivo TEXT, ms REAL);
+CREATE INDEX IF NOT EXISTS decisiones_ts ON decisiones(ts);
 """
+CAMPOS_DECISION = ("ts", "dpid", "sede_id", "sentido", "origen_ip", "destino_ip", "proto", "origen",
+                   "destino", "area", "clasificador", "clase", "cola", "motivo", "ms")
 
 PROTOCOLOS = {1: "icmp", 6: "tcp", 17: "udp"}
 NO_DISPONIBLE = 2 ** 64 - 1     # OpenFlow informa así un contador que el switch no tiene
@@ -80,31 +90,22 @@ class Telemetria:
         self._puertos: Dict[tuple, Tuple[int, int, float]] = {}
         self._descartes: Dict[tuple, int] = {}                     # puerto -> tx_dropped anterior
         self._sondeos: Dict[int, float] = {}                       # sede -> ts del sondeo anterior
+        self._politica = PorPolitica(politicas)
 
     # ---------------- quién es quién ----------------
     def describir(self, sw: dict, origen_ip: str, destino_ip: str, in_port: int) -> dict:
-        """Sentido, equipo local (de la sede del switch), área, servicio y clase de un flujo."""
-        sede = sw["sede_id"]
-        sentido = "subida" if in_port == sw["puerto_sede"] else "bajada"
-        o, d = self.inv.equipo(origen_ip), self.inv.equipo(destino_ip)
-        if o and o["sede_id"] == sede:
-            local, remoto = o, d
-        elif d and d["sede_id"] == sede:
-            local, remoto = d, o
-        else:
-            local, remoto = None, None
-        # El servicio lo define el lado que actúa como servidor: normalmente el otro
-        # extremo (Internet, la central); si ese no ofrece nada (p. ej. la PC de
-        # monitoreo que mira las cámaras), el servicio es el del equipo local (el NVR).
-        servicio = self.pol.servicio_de(remoto) if remoto else "desconocido"
-        if servicio == "desconocido" and local:
-            servicio = self.pol.servicio_de(local)
-        if local:
-            clase, _ = self.pol.clasificar(local["segmento"], local["tipo"], servicio)
-        else:
-            clase = self.pol.defecto["desconocido"]
+        """Sentido, equipo local (de la sede del switch), área, servicio y clase de un flujo.
+
+        La clase es la que dice la política (la "etiqueta verdadera" del flujo),
+        aunque el controlador esté usando otro clasificador: así la telemetría
+        sirve de referencia para comparar estrategias y para entrenar a la IA.
+        """
+        flujo = armar_flujo(self.inv, sw, origen_ip, destino_ip, 0, in_port, ts=0)
+        local, o, d = flujo.local, self.inv.equipo(origen_ip), self.inv.equipo(destino_ip)
+        servicio = self._politica.servicio(flujo)
+        clase = self._politica.clasificar(flujo).clase
         return {
-            "sentido": sentido, "servicio": servicio, "clase": clase,
+            "sentido": flujo.sentido, "servicio": servicio, "clase": clase,
             "local": local["nombre"] if local else "", "area": local["area"] if local else "Desconocida",
             "segmento": local["segmento"] if local else "", "tipo": local["tipo"] if local else "",
             "sede": local["sede"] if local else "",
@@ -220,13 +221,30 @@ class Telemetria:
         self.db.commit()
         return filas
 
+    # ---------------- decisiones del clasificador (PCIII-19) ----------------
+    def registrar_decisiones(self, decisiones: List[dict]) -> int:
+        """Guarda las decisiones del controlador (una por flujo nuevo): qué clase y cola
+        eligió, con qué clasificador, por qué y cuánto tardó. La aplicación de Ryu las
+        acumula y las guarda en el sondeo, para no escribir en disco con cada packet-in."""
+        if not decisiones:
+            return 0
+        self.db.executemany(
+            f"INSERT INTO decisiones VALUES ({','.join(':' + c for c in CAMPOS_DECISION)})",
+            [{c: d.get(c) for c in CAMPOS_DECISION} for d in decisiones])
+        self.db.commit()
+        return len(decisiones)
+
     # ---------------- mantenimiento ----------------
     def limpiar(self, ts: Optional[float] = None) -> int:
-        """Borra el detalle por flujo más antiguo que la retención. Devuelve filas borradas."""
+        """Borra el detalle por flujo y las decisiones más antiguas que la retención
+        (identifican equipos). Devuelve filas borradas."""
         ts = time.time() if ts is None else ts
-        cur = self.db.execute("DELETE FROM flujos WHERE ts < ?", (ts - self.retencion_s,))
+        borradas = 0
+        for tabla in ("flujos", "decisiones"):
+            borradas += self.db.execute(f"DELETE FROM {tabla} WHERE ts < ?",
+                                        (ts - self.retencion_s,)).rowcount
         self.db.commit()
-        return cur.rowcount
+        return borradas
 
 
 # ---------------- consultas ----------------
@@ -269,6 +287,40 @@ def demanda(db_path: str = DB_DEFECTO, minutos: float = 10, area: Optional[str] 
                        "maximo_mbps": round(max(g["por_ts"].values()), 3),
                        "segundos_con_datos": round(segundos, 1)})
     return salida
+
+
+def percentil(valores: List[float], p: float) -> Optional[float]:
+    """Percentil p (0-100) por el método del rango más cercano."""
+    if not valores:
+        return None
+    v = sorted(valores)
+    k = max(0, min(len(v) - 1, math.ceil(p / 100 * len(v)) - 1))
+    return v[k]
+
+
+def resumen_decisiones(db_path: str = DB_DEFECTO, minutos: float = 10, ahora: Optional[float] = None,
+                       sede_id: Optional[int] = None) -> List[dict]:
+    """Decisiones del controlador en los últimos 'minutos': cuántas por clasificador y
+    clase, y cuánto tardó cada una (p50, p95 y máximo, en ms)."""
+    ahora = time.time() if ahora is None else ahora
+    filtro, args = "ts >= ? AND ts <= ?", [ahora - minutos * 60, ahora]
+    if sede_id is not None:
+        filtro += " AND sede_id = ?"
+        args.append(sede_id)
+    con = sqlite3.connect(db_path)
+    try:
+        filas = con.execute(f"SELECT clasificador, clase, cola, ms FROM decisiones WHERE {filtro}",
+                            args).fetchall()
+    except sqlite3.OperationalError:        # base del Sprint 2, sin la tabla todavía
+        filas = []
+    con.close()
+    grupos: Dict[tuple, List[float]] = {}
+    for clasificador, clase, cola, ms in filas:
+        grupos.setdefault((clasificador, clase, cola), []).append(ms)
+    return [{"clasificador": c, "clase": k, "cola": q, "decisiones": len(ms),
+             "p50_ms": round(percentil(ms, 50), 2), "p95_ms": round(percentil(ms, 95), 2),
+             "max_ms": round(max(ms), 2)}
+            for (c, k, q), ms in sorted(grupos.items(), key=lambda x: (x[0][0], x[0][2]))]
 
 
 def uso_enlaces(db_path: str = DB_DEFECTO, minutos: float = 10,

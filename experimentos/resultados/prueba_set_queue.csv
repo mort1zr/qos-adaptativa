@@ -1,0 +1,30 @@
+fecha,sala,prueba,variante,clase,cola,medida,valor,criterio,cumple
+2026-10-25T19:15:24,1,decision_por_flujo,prioridad,tiempo_real,1,decisiones para 30 pings ida y vuelta,4,4 (una por sentido en cada switch de acceso) y clase tiempo_real,sí
+2026-10-25T19:15:24,1,decision_por_flujo,prioridad,,,packet-in en switches de acceso,4,-,-
+2026-10-25T19:15:24,1,decision_por_flujo,prioridad,,,primer ping (ms),30.7,-,-
+2026-10-25T19:15:24,1,decision_por_flujo,prioridad,,,mediana del resto de pings (ms),21.1,-,-
+2026-10-25T19:15:24,1,cada_clase_a_su_cola,fila_corta,tiempo_real,1,MB telemetría / MB en la cola,1.13 / 0.00 (descartes 0),sin clasificar: todo en la cola 0,sí
+2026-10-25T19:15:24,1,cada_clase_a_su_cola,fila_corta,critico,2,MB telemetría / MB en la cola,0.89 / 0.00 (descartes 0),sin clasificar: todo en la cola 0,sí
+2026-10-25T19:15:24,1,cada_clase_a_su_cola,fila_corta,negocio,3,MB telemetría / MB en la cola,8.03 / 0.00 (descartes 0),sin clasificar: todo en la cola 0,sí
+2026-10-25T19:15:24,1,cada_clase_a_su_cola,fila_corta,vigilancia,4,MB telemetría / MB en la cola,22.46 / 0.00 (descartes 0),sin clasificar: todo en la cola 0,sí
+2026-10-25T19:15:24,1,cada_clase_a_su_cola,fila_corta,masivo,0,MB telemetría / MB en la cola,343.93 / 405.89 (descartes 588),sin clasificar: todo en la cola 0,sí
+2026-10-25T19:15:24,1,cada_clase_a_su_cola,fila_corta,restringido,5,MB telemetría / MB en la cola,22.64 / 0.00 (descartes 0),sin clasificar: todo en la cola 0,sí
+2026-10-25T19:15:24,1,prioridad_se_nota,fila_corta,,,voz p95 peor sentido (ms),46.4,-,-
+2026-10-25T19:15:24,1,prioridad_se_nota,fila_corta,,,voz MOS,4.37,-,-
+2026-10-25T19:15:24,1,prioridad_se_nota,fila_corta,,,pagos p95 (ms),102.0,-,-
+2026-10-25T19:15:24,1,prioridad_se_nota,fila_corta,,,uso bajada %,88.5,-,-
+2026-10-25T19:15:24,1,prioridad_se_nota,fila_corta,,,uso subida %,92.0,-,-
+2026-10-25T19:15:24,1,cada_clase_a_su_cola,prioridad,tiempo_real,1,MB telemetría / MB en la cola,1.13 / 1.13 (descartes 0),su cola lleva 50-120 % de sus bytes (con descartes),sí
+2026-10-25T19:15:24,1,cada_clase_a_su_cola,prioridad,critico,2,MB telemetría / MB en la cola,0.91 / 0.91 (descartes 0),su cola lleva 50-120 % de sus bytes (con descartes),sí
+2026-10-25T19:15:24,1,cada_clase_a_su_cola,prioridad,negocio,3,MB telemetría / MB en la cola,7.77 / 8.04 (descartes 0),su cola lleva 50-120 % de sus bytes (con descartes),sí
+2026-10-25T19:15:24,1,cada_clase_a_su_cola,prioridad,vigilancia,4,MB telemetría / MB en la cola,22.46 / 22.46 (descartes 0),su cola lleva 50-120 % de sus bytes (con descartes),sí
+2026-10-25T19:15:24,1,cada_clase_a_su_cola,prioridad,masivo,0,MB telemetría / MB en la cola,358.69 / 366.35 (descartes 274),su cola lleva 50-120 % de sus bytes (con descartes),sí
+2026-10-25T19:15:24,1,cada_clase_a_su_cola,prioridad,restringido,5,MB telemetría / MB en la cola,22.74 / 22.96 (descartes 92),su cola lleva 50-120 % de sus bytes (con descartes),sí
+2026-10-25T19:15:24,1,prioridad_se_nota,prioridad,,,voz p95 peor sentido (ms),11.24,-,-
+2026-10-25T19:15:24,1,prioridad_se_nota,prioridad,,,voz MOS,4.4,-,-
+2026-10-25T19:15:24,1,prioridad_se_nota,prioridad,,,pagos p95 (ms),26.5,-,-
+2026-10-25T19:15:24,1,prioridad_se_nota,prioridad,,,uso bajada %,96.9,-,-
+2026-10-25T19:15:24,1,prioridad_se_nota,prioridad,,,uso subida %,91.0,-,-
+2026-10-25T19:15:24,1,prioridad_se_nota,comparación,,,voz con prioridad cumple y no empeora,46.4 -> 11.24 ms,cumple objetivos de voz y p95 <= el de fila_corta,sí
+2026-10-25T19:15:24,1,vencimiento,prioridad,,,reglas por flujo en acc1 (antes / después de 38 s),19 / 0,0 después de idle_timeout (30 s),sí
+2026-10-25T19:15:24,1,tiempo_de_decision,todas,,,decisiones / p50 / p95 / máx (ms),204 / 0.238 / 2.662 / 40.14,p95 < 50 ms,sí

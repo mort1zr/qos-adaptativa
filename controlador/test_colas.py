@@ -108,6 +108,22 @@ class Plan(unittest.TestCase):
             g = GestorColas(cargar(), ejecutar=lambda cmd, s=salida: s)
             self.assertEqual(g.rafaga_raiz("x"), esperado)
 
+    def test_contadores_por_cola(self):
+        salida = ("class htb 1:fffe root rate 30Mbit ceil 30Mbit burst 75000b cburst 75000b \n"
+                  " Sent 900000 bytes 700 pkt (dropped 0, overlimits 0 requeues 0) \n"
+                  " backlog 0b 0p requeues 0\n"
+                  "class htb 1:1 parent 1:fffe leaf 10: prio 4 rate 3Mbit ceil 30Mbit burst 75000b \n"
+                  " Sent 600000 bytes 450 pkt (dropped 12, overlimits 30 requeues 0) \n"
+                  "class htb 1:2 parent 1:fffe leaf 20: prio 0 rate 4500Kbit ceil 12Mbit burst 29999b \n"
+                  " Sent 8000 bytes 50 pkt (dropped 0, overlimits 0 requeues 0) \n"
+                  "class htb 1:b parent 1:fffe prio 7 rate 1Mbit ceil 1Mbit burst 1600b \n"
+                  " Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) \n")
+        g = GestorColas(cargar(), ejecutar=lambda cmd: salida)
+        c = g.contadores_colas("acc1-eth2")
+        self.assertEqual(sorted(c), [0, 1, 10])                   # 1:b (hex) = cola 10; sin la raíz
+        self.assertEqual(c[0], {"bytes": 600000, "paquetes": 450, "descartes": 12})
+        self.assertEqual(c[1]["bytes"], 8000)
+
     def test_mapa_de_ovs_vsctl(self):
         self.assertEqual(_mapa('{burst="240000", min-rate="1"}'), {"burst": "240000", "min-rate": "1"})
         self.assertEqual(_mapa("{0=aaa, 1=bbb}"), {"0": "aaa", "1": "bbb"})

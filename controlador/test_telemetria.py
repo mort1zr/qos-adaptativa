@@ -10,7 +10,7 @@ import tempfile
 import unittest
 
 from controlador.inventario import Inventario
-from controlador.telemetria import Telemetria, demanda, uso_enlaces
+from controlador.telemetria import Telemetria, demanda, percentil, resumen_decisiones, uso_enlaces
 from politicas.cargador import cargar
 
 INVENTARIO = """nombre,sede_id,sede,segmento,tipo,ip,gateway,detalle,area
@@ -158,6 +158,27 @@ class Telemetria_(unittest.TestCase):
         con = sqlite3.connect(self.db)
         self.assertEqual(con.execute("SELECT COUNT(*) FROM flujos").fetchone()[0], 0)
         self.assertEqual(con.execute("SELECT COUNT(*) FROM areas").fetchone()[0], 1)
+
+    def test_decisiones_y_su_tiempo(self):
+        base = {"dpid": 15, "sede_id": 1, "sentido": "subida", "origen_ip": "10.1.20.13",
+                "destino_ip": "10.0.10.14", "proto": 17, "origen": "sa1tel", "destino": "ofpbx",
+                "area": "Telefonía", "clasificador": "politica", "motivo": "x"}
+        decisiones = [dict(base, ts=10 + i, clase="tiempo_real", cola=1, ms=ms)
+                      for i, ms in enumerate((1.0, 2.0, 3.0, 40.0))]
+        decisiones.append(dict(base, ts=20, clase="masivo", cola=0, ms=0.5, clasificador="ninguno"))
+        self.assertEqual(self.tel.registrar_decisiones(decisiones), 5)
+        self.assertEqual(self.tel.registrar_decisiones([]), 0)
+        r = {(f["clasificador"], f["clase"]): f for f in resumen_decisiones(self.db, 1, ahora=30)}
+        tr = r[("politica", "tiempo_real")]
+        self.assertEqual((tr["decisiones"], tr["cola"], tr["p50_ms"], tr["max_ms"]), (4, 1, 2.0, 40.0))
+        self.assertEqual(r[("ninguno", "masivo")]["decisiones"], 1)
+        # las decisiones identifican equipos: se borran con la retención
+        self.assertEqual(self.tel.limpiar(ts=25 * 3600), 5)
+
+    def test_percentil(self):
+        self.assertIsNone(percentil([], 95))
+        self.assertEqual(percentil([5, 1, 3], 50), 3)
+        self.assertEqual(percentil(list(range(1, 101)), 95), 95)
 
     def test_inventario_se_recarga_si_cambia(self):
         inv = self.tel.inv

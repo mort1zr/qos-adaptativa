@@ -9,8 +9,8 @@ import unittest
 
 import yaml
 
-from escenarios.escenario import (ESCENARIOS, EscenarioInvalido, cargar_escenarios,
-                                  plan_escenario)
+from escenarios.escenario import (ESCENARIOS, ESTRATEGIAS, EscenarioInvalido, cargar_escenarios,
+                                  plan_escenario, poner_estrategia)
 from escenarios.reloj import RelojSimulado, leer_reloj
 
 
@@ -80,6 +80,56 @@ class Escenarios(unittest.TestCase):
     def test_escenario_desconocido(self):
         with self.assertRaises(EscenarioInvalido):
             plan_escenario(cargar_escenarios(), "feriado")
+
+
+class Estrategias(unittest.TestCase):
+    """Cada estrategia fija las colas de los enlaces Y el clasificador de Ryu (PCIII-19)."""
+
+    class Colas:
+        def __init__(self):
+            self.hoja, self.llamadas = None, []
+
+        def aplicar(self, puerto, mbps):
+            self.llamadas.append(("colas", puerto))
+
+        def linea_base(self, puerto, mbps):
+            self.llamadas.append(("una_cola", puerto))
+
+    class Emp:
+        def __init__(self):
+            self.colas = Estrategias.Colas()
+            self.puertos_acceso = [("acc1", "acc1-eth1", 30, "subida"), ("acc1", "acc1-eth2", 30, "bajada")]
+
+    class Api:
+        class ErrorApi(RuntimeError):
+            pass
+
+        def __init__(self, falla=False):
+            self.falla, self.pedidos = falla, []
+
+        def poner_clasificador(self, nombre):
+            if self.falla:
+                raise self.ErrorApi("sin API")
+            self.pedidos.append(nombre)
+
+    def test_cada_estrategia_pide_su_clasificador(self):
+        esperado = {"sin_qos": ("una_cola", "fifo", "ninguno"),
+                    "fila_corta": ("colas", "pfifo:64", "ninguno"),
+                    "prioridad": ("colas", "pfifo:64", "politica")}
+        self.assertEqual(set(esperado), set(ESTRATEGIAS))
+        for estrategia, (colas, hoja, clasificador) in esperado.items():
+            emp, cliente = self.Emp(), self.Api()
+            poner_estrategia(emp, estrategia, cliente=cliente)
+            self.assertEqual({c for c, _ in emp.colas.llamadas}, {colas}, estrategia)
+            self.assertEqual(emp.colas.hoja, hoja, estrategia)
+            self.assertEqual(cliente.pedidos, [clasificador], estrategia)
+
+    def test_sin_api_prioridad_falla_y_las_demas_avisan(self):
+        avisos = []
+        poner_estrategia(self.Emp(), "fila_corta", cliente=self.Api(falla=True), avisar=avisos.append)
+        self.assertEqual(len(avisos), 1)
+        with self.assertRaises(RuntimeError):
+            poner_estrategia(self.Emp(), "prioridad", cliente=self.Api(falla=True))
 
 
 class Reloj(unittest.TestCase):

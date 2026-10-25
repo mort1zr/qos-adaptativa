@@ -8,6 +8,7 @@ Ejemplos (no hace falta sudo; funciona con la red levantada o después):
   python3 controlador/consultas.py demanda --por clase --minutos 10
   python3 controlador/consultas.py enlaces --minutos 10
   python3 controlador/consultas.py flujos --minutos 2 --top 10
+  python3 controlador/consultas.py decisiones --minutos 10      # PCIII-19: clase, cola y tiempo
 """
 import argparse
 import os
@@ -19,7 +20,7 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if RAIZ not in sys.path:
     sys.path.insert(0, RAIZ)
 
-from controlador.telemetria import DB_DEFECTO, demanda, uso_enlaces  # noqa: E402
+from controlador.telemetria import DB_DEFECTO, demanda, resumen_decisiones, uso_enlaces  # noqa: E402
 
 
 def mostrar_demanda(filas, titulo):
@@ -67,6 +68,18 @@ def mostrar_flujos(db, minutos, top):
         print(f"  {o:12s} {d:12s} {p:>5} {a:14s} {s:16s} {c:12s} {se:7s} {prom:6.2f} Mb {mx:6.2f} Mb")
 
 
+def mostrar_decisiones(filas, minutos):
+    if not filas:
+        print(f"Sin decisiones del controlador en los últimos {minutos:g} minutos.")
+        return
+    print(f"Decisiones del controlador (una por flujo nuevo) en los últimos {minutos:g} minutos:")
+    print(f"  {'Clasificador':12s} {'Clase':12s} {'Cola':>4s} {'Flujos':>7s} {'p50':>8s} {'p95':>8s} {'Máx.':>8s}")
+    for f in filas:
+        print(f"  {f['clasificador']:12s} {f['clase']:12s} {f['cola']:>4} {f['decisiones']:>7} "
+              f"{f['p50_ms']:5.2f} ms {f['p95_ms']:5.2f} ms {f['max_ms']:5.2f} ms")
+    print("  (tiempo desde que llega el primer paquete hasta que la regla con su cola sale al switch)")
+
+
 def main():
     p = argparse.ArgumentParser(description="Consultas sobre la telemetría")
     p.add_argument("--db", default=DB_DEFECTO)
@@ -81,6 +94,9 @@ def main():
     f = sub.add_parser("flujos", help="flujos con más tráfico")
     f.add_argument("--minutos", type=float, default=5)
     f.add_argument("--top", type=int, default=10)
+    c = sub.add_parser("decisiones", help="clase y cola elegidas por el controlador, y su tiempo")
+    c.add_argument("--minutos", type=float, default=10)
+    c.add_argument("--sede", type=int)
     args = p.parse_args()
 
     if not os.path.exists(args.db):
@@ -93,6 +109,8 @@ def main():
     elif args.accion == "enlaces":
         print(f"Uso de los enlaces de acceso en los últimos {args.minutos:g} minutos:")
         mostrar_enlaces(uso_enlaces(args.db, args.minutos))
+    elif args.accion == "decisiones":
+        mostrar_decisiones(resumen_decisiones(args.db, args.minutos, sede_id=args.sede), args.minutos)
     else:
         print(f"Flujos con más tráfico en los últimos {args.minutos:g} minutos:")
         mostrar_flujos(args.db, args.minutos, args.top)

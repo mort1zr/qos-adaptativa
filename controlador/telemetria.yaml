@@ -1,5 +1,8 @@
-# Configuración de la telemetría del controlador (historia PCIII-16).
+# Configuración del controlador (historias PCIII-16 y PCIII-19).
 intervalo_s: 5            # cada cuántos segundos se leen los contadores de los switches de acceso
 idle_timeout_s: 30        # un flujo sin tráfico por este tiempo se borra del switch
-retencion_flujos_h: 24    # el detalle por flujo (identifica equipos) se borra pasado este tiempo
+retencion_flujos_h: 24    # el detalle por flujo y las decisiones (identifican equipos) se borran pasado este tiempo
 base_datos: datos/telemetria.db
+# Clasificador con el que arranca Ryu: ninguno (sin set_queue) o politica.
+# Los escenarios lo cambian solos con la API según la estrategia.
+clasificador: ninguno

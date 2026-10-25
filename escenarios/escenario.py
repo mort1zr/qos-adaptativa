@@ -5,7 +5,7 @@ Escenarios reproducibles de la empresa (historia PCIII-18).
   python3 escenarios/escenario.py --listar
   python3 escenarios/escenario.py --plan --nombre sorteo --ruido 0.1
   sudo python3 escenarios/escenario.py --nombre sorteo --estrategia fila_corta --sala 1
-  sudo python3 escenarios/escenario.py --todos --estrategia sin_qos,fila_corta --sala 4
+  sudo python3 escenarios/escenario.py --todos --estrategia sin_qos,fila_corta,prioridad --sala 4
 
 Levanta la red una sola vez y, para cada estrategia y cada escenario, recorre
 sus fases: genera el tráfico de los perfiles (trafico/), mide la voz y los
@@ -13,9 +13,13 @@ pagos con sondas y lee el uso del enlace de la sala. El reloj simulado se
 publica en datos/reloj.json y cada fase queda registrada en datos/contexto.csv
 (para unir la telemetría con el escenario, la hora y la estrategia).
 
-Estrategias: sin_qos (una cola, FIFO larga: red sin gestionar) y fila_corta
-(6 colas, todo en "masivo", fila corta: la estrategia de control). 'estatica'
-llega en el Sprint 3 (PCIII-21) e 'ia' en los Sprints 4-5.
+Estrategias:
+  sin_qos     una cola, FIFO larga: red sin gestionar
+  fila_corta  6 colas, todo en "masivo", fila corta: la estrategia de control
+  prioridad   6 colas y el controlador manda cada flujo a la cola de su clase
+              según politicas.yaml (set_queue, PCIII-19); las tasas no cambian
+'estatica' (reglas por horario) llega en PCIII-21 e 'ia' en los Sprints 4-5.
+La estrategia también fija el clasificador de Ryu, por su API REST.
 
 Con la misma --semilla el tráfico es el mismo; --ruido 0.1 varía cada
 intensidad ±10 % (reproducible con la semilla) para no validar a la IA con
@@ -43,13 +47,15 @@ for ruta in (os.path.join(RAIZ, "topologia"), os.path.join(RAIZ, "experimentos")
 import yaml  # noqa: E402
 
 from escenarios.reloj import DIAS, RelojSimulado, normalizar_dia  # noqa: E402
+from controlador import api  # noqa: E402
 from trafico.generador import APLICACIONES, Generador, cargar_perfiles  # noqa: E402
 
 ESCENARIOS = os.path.join(AQUI, "escenarios.yaml")
 CSV = os.path.join(RAIZ, "experimentos", "resultados", "escenarios.csv")
 CONTEXTO = os.path.join(RAIZ, "datos", "contexto.csv")
-ESTRATEGIAS = {"sin_qos": "sin_qos", "fila_corta": "colas"}     # nombre -> estrategia de la topología
-FUTURAS = {"estatica": "el Sprint 3 (PCIII-21)", "ia": "los Sprints 4 y 5"}
+ESTRATEGIAS = {"sin_qos": "sin_qos", "fila_corta": "colas", "prioridad": "colas"}  # -> colas de la topología
+CLASIFICADOR = {"sin_qos": "ninguno", "fila_corta": "ninguno", "prioridad": "politica"}  # -> clasificador de Ryu
+FUTURAS = {"estatica": "PCIII-21 (Sprint 3)", "ia": "los Sprints 4 y 5"}
 PUERTO_VOZ = 5001
 
 
@@ -107,13 +113,21 @@ def plan_escenario(datos: dict, nombre: str, semilla: int = 7, ruido: float = 0.
 
 
 # ---------------- ejecución en la red ----------------
-def poner_estrategia(emp, estrategia):
+def poner_estrategia(emp, estrategia, cliente=api, avisar=print):
+    """Colas de los enlaces de acceso y clasificador de Ryu de una estrategia."""
     emp.colas.hoja = "fifo" if estrategia == "sin_qos" else "pfifo:64"
     for _, puerto, mbps, _ in emp.puertos_acceso:
         if ESTRATEGIAS[estrategia] == "colas":
             emp.colas.aplicar(puerto, mbps)
         else:
             emp.colas.linea_base(puerto, mbps)
+    clasificador = CLASIFICADOR[estrategia]
+    try:
+        cliente.poner_clasificador(clasificador)
+    except cliente.ErrorApi:
+        if clasificador != "ninguno":
+            raise
+        avisar("    (aviso: sin la API de Ryu no se pudo confirmar el clasificador 'ninguno')")
 
 
 def correr_fase(emp, gen, sala, fase, sondas, m, reloj, nombre, estrategia):
@@ -244,7 +258,7 @@ def main():
     p.add_argument("--nombre", help="escenario a correr")
     p.add_argument("--todos", action="store_true", help="los 5 escenarios, uno tras otro")
     p.add_argument("--estrategia", default="fila_corta",
-                   help="sin_qos, fila_corta (o varias separadas por coma)")
+                   help="sin_qos, fila_corta, prioridad (o varias separadas por coma)")
     p.add_argument("--sala", type=int, default=1, choices=[1, 2, 3, 4])
     p.add_argument("--semilla", type=int, default=7)
     p.add_argument("--ruido", type=float, default=0.0, help="variación aleatoria de las intensidades (0.1 = ±10 %%)")
@@ -288,6 +302,8 @@ def main():
     import medicion as m
     if not controlador_activo():
         sys.exit(AVISO_RYU.format(ip="127.0.0.1", puerto=6633))
+    if any(CLASIFICADOR[e] != "ninguno" for e in estrategias) and not api.disponible():
+        sys.exit(api.AVISO.format(url=api.URL))
     setLogLevel("info")
     with open(CONFIG_DEFECTO) as f:
         cfg = yaml.safe_load(f)

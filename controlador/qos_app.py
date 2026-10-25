@@ -1,5 +1,6 @@
 """
-Aplicación Ryu del proyecto (historia PCIII-16: telemetría).
+Aplicación Ryu del proyecto (historias PCIII-16: telemetría, y PCIII-19: cada
+flujo a su cola).
 
 Reemplaza a ryu.app.simple_switch_13. Arranque, desde ~/qos-adaptativa y con el
 .venv activo (Python 3.9):
@@ -9,17 +10,33 @@ Reemplaza a ryu.app.simple_switch_13. Arranque, desde ~/qos-adaptativa y con el
 Qué hace:
   - Switches de segmento, islas e Internet: switch L2 que aprende direcciones
     MAC (igual que simple_switch_13).
-  - Switches de acceso (acc0..acc4, el enlace de cada sede): una regla OpenFlow
-    por flujo IP (origen, destino, protocolo) con contadores propios. Cada
-    'intervalo_s' segundos pide las estadísticas de esos flujos y de los puertos,
-    y las guarda con controlador/telemetria.py en datos/telemetria.db.
-    Cuando un flujo vence (idle_timeout), el switch avisa y se guardan sus
-    últimos bytes. En el Sprint 3 esas mismas reglas llevarán set_queue.
+  - Switches de acceso (acc0..acc4, el enlace de cada sede): con el PRIMER
+    paquete de cada flujo IP (origen, destino, protocolo) el clasificador
+    decide su clase, y se instala una regla OpenFlow con set_queue (la cola de
+    esa clase) + salida. Los demás paquetes del flujo los despacha el switch
+    sin consultar al controlador. La regla vence tras 'idle_timeout_s' sin
+    tráfico. Cada decisión se guarda con su tiempo (tabla 'decisiones').
+  - Cada 'intervalo_s' segundos pide las estadísticas de esas reglas y de los
+    puertos y las guarda con controlador/telemetria.py en datos/telemetria.db.
+
+Clasificadores (controlador/clasificadores.py):
+  ninguno   sin set_queue: todo a la cola por defecto (sin_qos, fila_corta).
+  politica  la clase que dice politicas/politicas.yaml (estrategia prioridad).
+El inicial está en controlador/telemetria.yaml ('clasificador'); se cambia en
+caliente con la API REST, que solo escucha en esta máquina:
+
+    curl http://127.0.0.1:8080/qos/estado
+    curl -X PUT -d '{"nombre": "politica"}' http://127.0.0.1:8080/qos/clasificador
+
+(o python3 controlador/api.py estado | clasificador politica). Al cambiar de
+clasificador se borran las reglas por flujo, para que cada flujo se vuelva a
+decidir con el nuevo.
 
 El rol de cada switch lo lee de topologia/switches.csv, que escribe la
-topología al construirse. Configuración: controlador/telemetria.yaml.
-Consultas: python3 controlador/consultas.py demanda --area Contabilidad --minutos 10
+topología al construirse.
 """
+import collections
+import json
 import os
 import sys
 import time
@@ -28,6 +45,8 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if RAIZ not in sys.path:
     sys.path.insert(0, RAIZ)
 
+from ryu import cfg as ryu_cfg  # noqa: E402
+from ryu.app.wsgi import ControllerBase, WSGIApplication, route  # noqa: E402
 from ryu.base import app_manager  # noqa: E402
 from ryu.controller import ofp_event  # noqa: E402
 from ryu.controller.handler import (CONFIG_DISPATCHER, DEAD_DISPATCHER,  # noqa: E402
@@ -35,19 +54,30 @@ from ryu.controller.handler import (CONFIG_DISPATCHER, DEAD_DISPATCHER,  # noqa:
 from ryu.lib import hub  # noqa: E402
 from ryu.lib.packet import ether_types, ethernet, ipv4, packet  # noqa: E402
 from ryu.ofproto import ofproto_v1_3  # noqa: E402
+from webob import Response  # noqa: E402
 
+from controlador.clasificadores import CLASIFICADORES, armar_flujo, crear  # noqa: E402
 from controlador.inventario import Inventario  # noqa: E402
-from controlador.telemetria import Telemetria, leer_config  # noqa: E402
+from controlador.telemetria import Telemetria, leer_config, percentil  # noqa: E402
 from politicas.cargador import cargar  # noqa: E402
 
 COOKIE_FLUJO = 0x16          # reglas por flujo de esta aplicación (las de prueba de PCIII-15 usan 0x15)
 PRIORIDAD_FLUJO = 10
 PRIORIDAD_ARP = 5
 PRIORIDAD_L2 = 1
+API = "qos_app"
+
+# La API REST solo escucha en esta máquina (Ryu, por defecto, abre 0.0.0.0:8080).
+# En una red real la API "hacia el norte" del controlador va además autenticada.
+try:
+    ryu_cfg.CONF.set_default("wsapi_host", "127.0.0.1")
+except Exception:            # opción no registrada: se usa la de Ryu
+    pass
 
 
 class QoSApp(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
+    _CONTEXTS = {"wsgi": WSGIApplication}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -57,12 +87,20 @@ class QoSApp(app_manager.RyuApp):
         self.tel = Telemetria(self.inv, self.pol, self.cfg["base_datos"],
                               intervalo_s=self.cfg["intervalo_s"],
                               retencion_h=self.cfg["retencion_flujos_h"])
+        self.clasificador = crear(self.cfg["clasificador"], self.pol)
         self.mac_a_puerto = {}
         self.datapaths = {}
         self._partes = {}            # dpid -> estadísticas de flujos recibidas en varias partes
-        self.logger.info("QoSApp: telemetría cada %s s en %s (%d equipos, %d switches de acceso)",
-                         self.cfg["intervalo_s"], self.cfg["base_datos"], len(self.inv.por_ip),
-                         len(self.inv.accesos()))
+        self._decisiones = []        # se guardan en la base en cada sondeo
+        self._ms = collections.deque(maxlen=2000)
+        self.contadores = {"packet_in": 0, "packet_in_acceso": 0, "decisiones": 0,
+                           "cambios_clasificador": 0}
+        kwargs["wsgi"].register(QoSRest, {API: self})
+        self.logger.info("QoSApp: clasificador '%s', telemetría cada %s s en %s (%d equipos, "
+                         "%d switches de acceso); API en http://127.0.0.1:%s/qos/estado",
+                         self.clasificador.nombre, self.cfg["intervalo_s"], self.cfg["base_datos"],
+                         len(self.inv.por_ip), len(self.inv.accesos()),
+                         getattr(ryu_cfg.CONF, "wsapi_port", 8080))
         self.hilo = hub.spawn(self._sondear)
 
     # ---------------- utilidades ----------------
@@ -79,9 +117,13 @@ class QoSApp(app_manager.RyuApp):
         """En un switch de acceso, lo que entra por un lado sale por el otro."""
         return sw["puerto_sede"] if in_port == sw["puerto_operador"] else sw["puerto_operador"]
 
-    def acciones_flujo(self, dp, sw, ip, salida):
-        """Acciones de la regla de un flujo. En el Sprint 3 se agregará set_queue aquí."""
-        return [dp.ofproto_parser.OFPActionOutput(salida)]
+    def acciones_flujo(self, dp, cola, salida):
+        """Acciones de la regla de un flujo: su cola (set_queue) y la salida.
+        Sin clasificador no se marca la cola: todo va a la cola por defecto."""
+        parser = dp.ofproto_parser
+        if self.clasificador.nombre == "ninguno":
+            return [parser.OFPActionOutput(salida)]
+        return [parser.OFPActionSetQueue(cola), parser.OFPActionOutput(salida)]
 
     # ---------------- conexión de los switches ----------------
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
@@ -111,6 +153,7 @@ class QoSApp(app_manager.RyuApp):
     # ---------------- reenvío ----------------
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def al_recibir_paquete(self, ev):
+        t0 = time.perf_counter()
         msg = ev.msg
         dp = msg.datapath
         ofp, parser = dp.ofproto, dp.ofproto_parser
@@ -119,22 +162,29 @@ class QoSApp(app_manager.RyuApp):
         eth = pkt.get_protocols(ethernet.ethernet)[0]
         if eth.ethertype == ether_types.ETH_TYPE_LLDP:
             return
+        self.contadores["packet_in"] += 1
 
         sw = self.inv.switch(dp.id)
         if sw and sw["tipo"] == "acceso" and sw["puerto_operador"] and sw["puerto_sede"]:
             salida = self.otro_puerto(sw, in_port)
             ip = pkt.get_protocol(ipv4.ipv4)
             if ip:
+                self.contadores["packet_in_acceso"] += 1
+                flujo = armar_flujo(self.inv, sw, ip.src, ip.dst, ip.proto, in_port)
+                decision = self.clasificador.clasificar(flujo)
+                cola = self.pol.cola(decision.clase)
+                acciones = self.acciones_flujo(dp, cola, salida)
                 match = parser.OFPMatch(in_port=in_port, eth_type=ether_types.ETH_TYPE_IP,
                                         ipv4_src=ip.src, ipv4_dst=ip.dst, ip_proto=ip.proto)
-                acciones = self.acciones_flujo(dp, sw, ip, salida)
                 self.agregar_flujo(dp, PRIORIDAD_FLUJO, match, acciones,
                                    idle=self.cfg["idle_timeout_s"], cookie=COOKIE_FLUJO,
                                    flags=ofp.OFPFF_SEND_FLOW_REM, buffer_id=msg.buffer_id)
-                if msg.buffer_id != ofp.OFP_NO_BUFFER:
-                    return
-            else:
-                acciones = [parser.OFPActionOutput(salida)]
+                if msg.buffer_id == ofp.OFP_NO_BUFFER:
+                    dp.send_msg(parser.OFPPacketOut(datapath=dp, buffer_id=msg.buffer_id, in_port=in_port,
+                                                    actions=acciones, data=msg.data))
+                self._anotar(dp.id, flujo, decision, cola, (time.perf_counter() - t0) * 1000)
+                return
+            acciones = [parser.OFPActionOutput(salida)]
         else:
             # Switch L2 con aprendizaje de MAC (como simple_switch_13).
             tabla = self.mac_a_puerto.setdefault(dp.id, {})
@@ -151,6 +201,50 @@ class QoSApp(app_manager.RyuApp):
         dp.send_msg(parser.OFPPacketOut(datapath=dp, buffer_id=msg.buffer_id, in_port=in_port,
                                         actions=acciones, data=datos))
 
+    def _anotar(self, dpid, flujo, decision, cola, ms):
+        self.contadores["decisiones"] += 1
+        self._ms.append(ms)
+        local = flujo.local
+        o, d = self.inv.equipo(flujo.origen_ip), self.inv.equipo(flujo.destino_ip)
+        self._decisiones.append({
+            "ts": flujo.ts, "dpid": dpid, "sede_id": flujo.sede_id, "sentido": flujo.sentido,
+            "origen_ip": flujo.origen_ip, "destino_ip": flujo.destino_ip, "proto": flujo.proto,
+            "origen": o["nombre"] if o else flujo.origen_ip, "destino": d["nombre"] if d else flujo.destino_ip,
+            "area": local["area"] if local else "Desconocida", "clasificador": self.clasificador.nombre,
+            "clase": decision.clase, "cola": cola, "motivo": decision.motivo, "ms": round(ms, 3)})
+
+    # ---------------- clasificador (API) ----------------
+    def poner_clasificador(self, nombre):
+        """Cambia el clasificador y borra las reglas por flujo de los switches de acceso:
+        cada flujo se vuelve a decidir con el nuevo en su siguiente paquete."""
+        self.clasificador = crear(nombre, self.pol)
+        self.contadores["cambios_clasificador"] += 1
+        borrados = 0
+        for dpid, dp in list(self.datapaths.items()):
+            if self.inv.es_acceso(dpid):
+                ofp, parser = dp.ofproto, dp.ofproto_parser
+                dp.send_msg(parser.OFPFlowMod(datapath=dp, command=ofp.OFPFC_DELETE,
+                                              table_id=ofp.OFPTT_ALL, cookie=COOKIE_FLUJO,
+                                              cookie_mask=0xFFFFFFFFFFFFFFFF, out_port=ofp.OFPP_ANY,
+                                              out_group=ofp.OFPG_ANY, match=parser.OFPMatch()))
+                borrados += 1
+        self.logger.info("Clasificador -> '%s' (reglas por flujo borradas en %d switches de acceso)",
+                         nombre, borrados)
+        return borrados
+
+    def estado(self):
+        ms = list(self._ms)
+        return {
+            "clasificador": self.clasificador.nombre,
+            "clasificadores": {n: c.descripcion for n, c in CLASIFICADORES.items()},
+            "switches_acceso": sorted(self.inv.switch(d)["nombre"] for d in self.datapaths
+                                      if self.inv.es_acceso(d)),
+            "contadores": dict(self.contadores),
+            "decision_ms": {"n": len(ms), "p50": percentil(ms, 50), "p95": percentil(ms, 95),
+                            "max": max(ms) if ms else None},
+            "idle_timeout_s": self.cfg["idle_timeout_s"],
+        }
+
     # ---------------- telemetría ----------------
     def _sondear(self):
         vueltas = 0
@@ -161,6 +255,8 @@ class QoSApp(app_manager.RyuApp):
                 for dpid, dp in list(self.datapaths.items()):
                     if self.inv.es_acceso(dpid):
                         self._pedir_estadisticas(dp)
+                pendientes, self._decisiones = self._decisiones, []
+                self.tel.registrar_decisiones(pendientes)
                 vueltas += 1
                 if vueltas % 720 == 0:          # ~ cada hora con 5 s
                     borradas = self.tel.limpiar()
@@ -216,3 +312,32 @@ class QoSApp(app_manager.RyuApp):
                                       eliminados=True)
         except Exception:
             self.logger.exception("Error al guardar un flujo vencido")
+
+
+def _json(obj, estado=200):
+    return Response(status=estado, content_type="application/json", charset="utf-8",
+                    body=json.dumps(obj, ensure_ascii=False).encode("utf-8"))
+
+
+class QoSRest(ControllerBase):
+    """API REST local del controlador (lo que en SDN se llama la interfaz "norte")."""
+
+    def __init__(self, req, link, data, **config):
+        super().__init__(req, link, data, **config)
+        self.app = data[API]
+
+    @route("qos", "/qos/estado", methods=["GET"])
+    def estado(self, req, **kwargs):
+        return _json(self.app.estado())
+
+    @route("qos", "/qos/clasificador", methods=["PUT", "POST"])
+    def clasificador(self, req, **kwargs):
+        try:
+            nombre = json.loads(req.body.decode("utf-8") or "{}").get("nombre")
+        except (ValueError, AttributeError):
+            return _json({"error": "se esperaba JSON: {\"nombre\": \"politica\"}"}, 400)
+        if nombre not in CLASIFICADORES:
+            return _json({"error": f"clasificador desconocido: {nombre}",
+                          "clasificadores": list(CLASIFICADORES)}, 400)
+        self.app.poner_clasificador(nombre)
+        return _json(self.app.estado())
