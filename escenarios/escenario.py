@@ -9,8 +9,10 @@ Escenarios reproducibles de la empresa (historia PCIII-18).
   sudo python3 escenarios/escenario.py --todos --estrategia sin_qos,fila_corta,prioridad --sala 4
 
 Levanta la red una sola vez y, para cada estrategia y cada escenario, recorre
-sus fases: genera el tráfico de los perfiles (trafico/), mide la voz y los
-pagos con sondas y lee el uso del enlace de la sala. El reloj simulado se
+sus fases: genera el tráfico de los perfiles (trafico/), mide con sondas la
+voz, la videollamada, los pagos y la carga de páginas web, lee el uso del
+enlace de la sala y, de la telemetría, cuánto obtuvo cada clase y a qué ritmo
+avanzaron el respaldo y las descargas (lo que pierde lo "masivo" al priorizar). El reloj simulado se
 publica en datos/reloj.json y cada fase queda registrada en datos/contexto.csv
 (para unir la telemetría con el escenario, la hora y la estrategia).
 
@@ -64,6 +66,9 @@ CLASIFICADOR = {"sin_qos": "ninguno", "fila_corta": "ninguno", "prioridad": "des
 CON_HORARIO = {"estatica"}                                                     # -> techos por horario
 FUTURAS = {"ia": "los Sprints 4 y 5"}
 PUERTO_VOZ = 5001
+PUERTO_VIDEO = 5002
+SONDAS = {"voz", "video", "pagos", "web"}
+CLASES_TELEMETRIA = ("tiempo_real", "critico", "negocio", "vigilancia", "masivo", "restringido")
 
 
 class EscenarioInvalido(ValueError):
@@ -77,6 +82,8 @@ def cargar_escenarios(ruta: str = ESCENARIOS, perfiles: dict = None) -> dict:
     errores = []
     if not datos.get("reloj", {}).get("factor", 0) > 0:
         errores.append("reloj.factor debe ser mayor que 0")
+    for k in set(datos.get("sondas") or {}) - SONDAS:
+        errores.append(f"sonda desconocida '{k}' (hay: {', '.join(sorted(SONDAS))})")
     for nombre, e in datos.get("escenarios", {}).items():
         inicio = e.get("inicio", {})
         if normalizar_dia(str(inicio.get("dia", ""))) not in DIAS:
@@ -88,6 +95,8 @@ def cargar_escenarios(ruta: str = ESCENARIOS, perfiles: dict = None) -> dict:
             errores.append(f"{nombre}: hora de inicio inválida '{inicio.get('hora')}' (usa HH:MM)")
         if not e.get("fases"):
             errores.append(f"{nombre}: necesita al menos una fase")
+        for k in set(e.get("sondas") or {}) - SONDAS:
+            errores.append(f"{nombre}: sonda desconocida '{k}'")
         for i, fase in enumerate(e.get("fases") or [], 1):
             etiqueta = f"{nombre}/{fase.get('nombre', i)}"
             if not (isinstance(fase.get("duracion_s"), (int, float)) and fase["duracion_s"] >= 10):
@@ -101,6 +110,14 @@ def cargar_escenarios(ruta: str = ESCENARIOS, perfiles: dict = None) -> dict:
     if errores:
         raise EscenarioInvalido("Escenarios inválidos:\n  - " + "\n  - ".join(errores))
     return datos
+
+
+def sondas_de(datos: dict, nombre: str) -> dict:
+    """Sondas de un escenario: las generales, con lo que el escenario cambie
+    (p. ej. la madrugada apaga la videollamada y la web: la sala está cerrada)."""
+    sondas = dict(datos.get("sondas") or {})
+    sondas.update(datos["escenarios"][nombre].get("sondas") or {})
+    return {k: v for k, v in sondas.items() if v}
 
 
 def plan_escenario(datos: dict, nombre: str, semilla: int = 7, ruido: float = 0.0,
@@ -137,7 +154,80 @@ def poner_estrategia(emp, estrategia, cliente=api, avisar=print):
         avisar("    (aviso: sin la API de Ryu no se pudo confirmar el clasificador 'ninguno')")
 
 
-def correr_fase(emp, gen, sala, fase, sondas, m, reloj, nombre, estrategia):
+def sonda_udp(m, a, b, puerto, perfil, dur, sonda_dur):
+    """Sonda UDP en los dos sentidos entre a y b: (receptores, emisores)."""
+    rx = {"subida": m.receptor_udp(b, puerto, dur + 30), "bajada": m.receptor_udp(a, puerto, dur + 30)}
+    return rx, (a, b, puerto, perfil, sonda_dur)
+
+
+def evaluar_udp(m, rx, prefijo, con_mos):
+    """Columnas de una sonda UDP de dos sentidos; se califica por el peor sentido."""
+    fila, sentidos = {}, {}
+    for sentido, (_, ruta) in rx.items():
+        r = m.resultado_udp(ruta)
+        if "error" in r:
+            r = {"latencia_p95_ms": None, "jitter_ms": None, "perdida_pct": 100.0}
+        if con_mos:
+            r["mos"] = m.mos(r["latencia_p95_ms"], r["jitter_ms"], r["perdida_pct"]) \
+                if r["latencia_p95_ms"] is not None else 1.0
+        sentidos[sentido] = r
+        fila.update({f"{prefijo}_{sentido}_lat95_ms": r["latencia_p95_ms"],
+                     f"{prefijo}_{sentido}_jitter_ms": r["jitter_ms"],
+                     f"{prefijo}_{sentido}_perdida_pct": r["perdida_pct"]})
+        if con_mos:
+            fila[f"{prefijo}_{sentido}_mos"] = r["mos"]
+    fila.update({f"{prefijo}_lat95_ms": max((r["latencia_p95_ms"] or 0) for r in sentidos.values()) or None,
+                 f"{prefijo}_jitter_ms": max((r["jitter_ms"] or 0) for r in sentidos.values()),
+                 f"{prefijo}_perdida_pct": max(r["perdida_pct"] for r in sentidos.values())})
+    if con_mos:
+        fila[f"{prefijo}_mos"] = min(r["mos"] for r in sentidos.values())
+    if any(r["latencia_p95_ms"] is None for r in sentidos.values()):
+        fila[f"cumple_{prefijo}"] = "no (sin datos)"
+    else:
+        fila[f"cumple_{prefijo}"] = m.evaluar({"latencia_p95_ms": fila[f"{prefijo}_lat95_ms"],
+                                               "jitter_ms": fila[f"{prefijo}_jitter_ms"],
+                                               "perdida_pct": fila[f"{prefijo}_perdida_pct"],
+                                               "mos": fila.get(f"{prefijo}_mos")})
+    return fila
+
+
+def leer_json(ruta, vacio):
+    try:
+        with open(ruta) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return vacio
+
+
+def metricas_telemetria(db: str, sede: int, desde: float, hasta: float, segundos: float) -> dict:
+    """Lo que obtuvo cada clase en la sala (Mbps, los dos sentidos) y el ritmo del
+    respaldo y de las descargas, según la telemetría del controlador. La clase es
+    la etiqueta de la política, la misma en todas las estrategias, para comparar."""
+    import sqlite3
+    try:
+        con = sqlite3.connect(db)
+        por_clase = dict(con.execute("SELECT clase, SUM(bytes) FROM flujos WHERE sede_id = ? AND ts > ? "
+                                     "AND ts <= ? GROUP BY clase", (sede, desde, hasta)).fetchall())
+        por_servicio = dict(con.execute("SELECT servicio, SUM(bytes) FROM flujos WHERE sede_id = ? AND ts > ? "
+                                        "AND ts <= ? AND servicio IN ('respaldo', 'descargas') GROUP BY servicio",
+                                        (sede, desde, hasta)).fetchall())
+        con.close()
+    except sqlite3.Error:
+        return {}
+    mbps = lambda b: round((b or 0) * 8 / segundos / 1e6, 2)  # noqa: E731
+    fila = {f"mbps_{c}": mbps(por_clase.get(c)) for c in CLASES_TELEMETRIA}
+    fila["respaldo_mbps"] = mbps(por_servicio.get("respaldo"))
+    fila["descargas_mbps"] = mbps(por_servicio.get("descargas"))
+    # A este ritmo, ¿cuánto tardaría 1 GB de respaldo? (8000 megabits)
+    fila["respaldo_min_1gb"] = round(8000 / fila["respaldo_mbps"] / 60, 1) if fila["respaldo_mbps"] >= 0.1 else None
+    return fila
+
+
+def correr_fase(emp, gen, sala, fase, sondas, m, reloj, nombre, estrategia, telemetria=None, objetivos=None):
+    """Corre una fase: tráfico de los perfiles + sondas. Devuelve (fila, t0, t1).
+    telemetria = (ruta de la base, intervalo_s): espera el último sondeo y agrega
+    lo que obtuvo cada clase."""
+    objetivos = objetivos or {}
     net, s, dur = emp.net, f"sa{sala}", fase["duracion_s"]
     cuellos = {sentido: p for sw, p, _, sentido in emp.puertos_acceso if sw == f"acc{sala}"}
     capacidad = next(mb for sw, _, mb, _ in emp.puertos_acceso if sw == f"acc{sala}")
@@ -151,41 +241,51 @@ def correr_fase(emp, gen, sala, fase, sondas, m, reloj, nombre, estrategia):
 
     # Sondas: arrancan 2 s después y terminan 2 s antes, para medir la fase "llena".
     sonda_dur = max(5, dur - 4)
-    tel, pbx = net.get(f"{s}tel"), net.get("ofpbx")
-    # La llamada va en los dos sentidos: subida (teléfono de la sala -> central) y
-    # bajada (central -> teléfono). Se evalúa por el peor de los dos, como se oiría.
-    rx_voz = {}
+    udp = {}     # nombre -> (receptores, (a, b, puerto, perfil, duración))
     if sondas.get("voz"):
-        rx_voz = {"subida": m.receptor_udp(pbx, PUERTO_VOZ, dur + 30),
-                  "bajada": m.receptor_udp(tel, PUERTO_VOZ, dur + 30)}
-    ruta_pagos = f"/tmp/qos_mediciones/pagos_{s}.json"
-    os.makedirs(os.path.dirname(ruta_pagos), exist_ok=True)
-    if os.path.exists(ruta_pagos):
-        os.remove(ruta_pagos)
+        # Llamada entre el teléfono de la sala y la central, en los dos sentidos.
+        udp["voz"] = sonda_udp(m, net.get(f"{s}tel"), net.get("ofpbx"), PUERTO_VOZ, m.VOIP, dur, sonda_dur)
+    if sondas.get("video"):
+        # Videollamada de la caja con Teams, en los dos sentidos.
+        v = sondas["video"] if isinstance(sondas["video"], dict) else {}
+        perfil = {"pps": v.get("pps", m.VIDEO["pps"]), "largo": v.get("largo", m.VIDEO["largo"])}
+        udp["video"] = sonda_udp(m, net.get(f"{s}caja"), net.get("inetvc"), PUERTO_VIDEO, perfil, dur, sonda_dur)
+    rutas = {}
+    for k in ("pagos", "web"):
+        if sondas.get(k):
+            rutas[k] = f"/tmp/qos_mediciones/{k}_{s}.json"
+            os.makedirs(os.path.dirname(rutas[k]), exist_ok=True)
+            if os.path.exists(rutas[k]):
+                os.remove(rutas[k])
     time.sleep(2)
     b0 = {k: emp.colas.bytes_enviados(p) for k, p in cuellos.items()}
     tb0 = time.time()
     procesos = []
-    if rx_voz:
-        procesos.append(m.emisor_udp(tel, pbx.IP(), PUERTO_VOZ, m.VOIP, sonda_dur))
-        procesos.append(m.emisor_udp(pbx, tel.IP(), PUERTO_VOZ, m.VOIP, sonda_dur))
-    pg = sondas.get("pagos")
-    if pg:
-        destino = net.get("inetpago1").IP()
-        procesos.append(net.get(f"{s}pos1").popen(
-            [gen.python, APLICACIONES, "cliente", "--destino", destino, "--puerto", "443",
-             "--patron", "transacciones", "--periodo", str(pg["periodo_s"]), "--nueva-conexion",
-             "--peticion", str(pg["peticion"]), "--respuesta", str(pg["respuesta"]),
-             "--variacion", "0", "--duracion", str(sonda_dur), "--salida", ruta_pagos],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+    for rx, (a, b, puerto, perfil, sd) in udp.values():
+        procesos.append(m.emisor_udp(a, b.IP(), puerto, perfil, sd))
+        procesos.append(m.emisor_udp(b, a.IP(), puerto, perfil, sd))
+
+    def transacciones(origen, destino, cfg, ruta):
+        return net.get(origen).popen(
+            [gen.python, APLICACIONES, "cliente", "--destino", net.get(destino).IP(), "--puerto", "443",
+             "--patron", "transacciones", "--periodo", str(cfg["periodo_s"]), "--nueva-conexion",
+             "--peticion", str(cfg["peticion"]), "--respuesta", str(cfg["respuesta"]),
+             "--variacion", "0", "--duracion", str(sonda_dur), "--salida", ruta],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if "pagos" in rutas:
+        procesos.append(transacciones(f"{s}pos1", "inetpago1", sondas["pagos"], rutas["pagos"]))
+    if "web" in rutas:
+        # Una página web desde la caja cada pocos segundos: lo "masivo" que sí ve una persona.
+        procesos.append(transacciones(f"{s}caja", "inetweb", sondas["web"], rutas["web"]))
     restante = dur - (time.time() - t0)
     time.sleep(max(0, restante - 2))
     b1 = {k: emp.colas.bytes_enviados(p) for k, p in cuellos.items()}
     tb1 = time.time()
     for p in procesos:
         m.esperar(p, limite=20)
-    for rx, _ in rx_voz.values():
-        m.esperar(rx, limite=15)
+    for rx, _ in udp.values():
+        for proc, _ in rx.values():
+            m.esperar(proc, limite=15)
     gen.esperar(limite=15)
     gen.procesos = [x for x in gen.procesos if "servidor" in x[0]]
     t1 = time.time()
@@ -193,37 +293,27 @@ def correr_fase(emp, gen, sala, fase, sondas, m, reloj, nombre, estrategia):
     uso = {k: 100 * (b1[k] - b0[k]) * 8 / (tb1 - tb0) / 1e6 / capacidad for k in cuellos}
     fila = {"fase": fase["nombre"], "hora_simulada": hora, "duracion_s": dur,
             "uso_bajada_pct": round(uso["bajada"], 1), "uso_subida_pct": round(uso["subida"], 1)}
-    if rx_voz:
-        sentidos = {}
-        for sentido, (_, ruta) in rx_voz.items():
-            r = m.resultado_udp(ruta)
-            if "error" in r:
-                r = {"latencia_p95_ms": None, "jitter_ms": None, "perdida_pct": 100.0, "mos": 1.0}
-            else:
-                r["mos"] = m.mos(r["latencia_p95_ms"], r["jitter_ms"], r["perdida_pct"])
-            sentidos[sentido] = r
-            fila.update({f"voz_{sentido}_lat95_ms": r["latencia_p95_ms"],
-                         f"voz_{sentido}_jitter_ms": r["jitter_ms"],
-                         f"voz_{sentido}_perdida_pct": r["perdida_pct"], f"voz_{sentido}_mos": r["mos"]})
-        peor = min(sentidos.values(), key=lambda r: r["mos"])
-        fila.update(voz_lat95_ms=max((r["latencia_p95_ms"] or 0) for r in sentidos.values()) or None,
-                    voz_jitter_ms=max((r["jitter_ms"] or 0) for r in sentidos.values()),
-                    voz_perdida_pct=max(r["perdida_pct"] for r in sentidos.values()),
-                    voz_mos=peor["mos"])
-        if peor["latencia_p95_ms"] is None:
-            fila["cumple_voz"] = "no (sin llamada)"
-        else:
-            fila["cumple_voz"] = m.evaluar({"latencia_p95_ms": fila["voz_lat95_ms"],
-                                            "jitter_ms": fila["voz_jitter_ms"],
-                                            "perdida_pct": fila["voz_perdida_pct"], "mos": fila["voz_mos"]})
-    if pg:
-        try:
-            with open(ruta_pagos) as f:
-                rp = json.load(f)
-        except (OSError, ValueError):
-            rp = {"transacciones": 0, "errores": 1}
+    if "voz" in udp:
+        fila.update(evaluar_udp(m, udp["voz"][0], "voz", con_mos=True))
+    if "video" in udp:
+        fila.update(evaluar_udp(m, udp["video"][0], "video", con_mos=False))
+    if "pagos" in rutas:
+        rp = leer_json(rutas["pagos"], {"transacciones": 0, "errores": 1})
         fila.update(pagos_n=rp.get("transacciones", 0), pagos_errores=rp.get("errores", 0),
                     pagos_p95_ms=rp.get("p95_ms"))
+    if "web" in rutas:
+        rw = leer_json(rutas["web"], {"transacciones": 0, "errores": 1})
+        fila.update(web_n=rw.get("transacciones", 0), web_errores=rw.get("errores", 0),
+                    web_p50_ms=rw.get("p50_ms"), web_p95_ms=rw.get("p95_ms"))
+        objetivo = objetivos.get("web_p95_ms", 3000)
+        ok = fila["web_n"] > 0 and fila["web_errores"] == 0 and (fila["web_p95_ms"] or 1e9) <= objetivo
+        fila["cumple_web"] = "sí" if ok else "no"
+    if telemetria:
+        db, intervalo = telemetria
+        # Un sondeo más: los últimos bytes de cada flujo llegan con él. De paso, las
+        # colas se vacían antes de la fase siguiente.
+        time.sleep(intervalo + 1)
+        fila.update(metricas_telemetria(db, sala, t0, time.time(), dur))
     return fila, t0, t1
 
 
@@ -268,7 +358,25 @@ def imprimir(filas):
               f"{voz:>16s} {fmt(f.get('voz_jitter_ms'), 2):>7s} "
               f"{fmt(f.get('voz_perdida_pct'), 2):>6s} {fmt(f.get('voz_mos'), 2):>5s} "
               f"{fmt(f.get('pagos_p95_ms'), 0):>7s} ms  {f.get('cumple_voz', '-')} / {f.get('cumple_pagos', '-')}")
-    print("\n    Voz: se mide la llamada en los dos sentidos; jitter, pérdida y MOS son los del peor.")
+    otras = [f for f in filas if any(k in f for k in ("video_lat95_ms", "web_p95_ms", "respaldo_mbps"))]
+    actual = None
+    for f in otras:
+        if (f["escenario"], f["estrategia"]) != actual:
+            actual = (f["escenario"], f["estrategia"])
+            print(f"\n  {f['escenario']} · {f['estrategia']} · otras métricas")
+            print(f"    {'Fase':16s} {'Video p95/pérd':>15s} {'Web p95':>8s} {'Respaldo':>9s} {'1 GB en':>8s} "
+                  f"{'Descargas':>10s} {'T.real':>7s} {'Masivo':>7s} {'Restr.':>7s}  Cumple video / web")
+        video = (f"{fmt(f.get('video_lat95_ms'), 0)} ms/{fmt(f.get('video_perdida_pct'), 1)}%"
+                 if "video_lat95_ms" in f else "-")
+        web = f"{fmt(f.get('web_p95_ms') / 1000 if f.get('web_p95_ms') else None, 1)} s" if "web_p95_ms" in f else "-"
+        gb = f"{fmt(f.get('respaldo_min_1gb'), 0)} min" if f.get("respaldo_min_1gb") else "-"
+        print(f"    {f['fase']:16s} {video:>15s} {web:>8s} {fmt(f.get('respaldo_mbps'), 1):>5s} Mb {gb:>8s} "
+              f"{fmt(f.get('descargas_mbps'), 1):>6s} Mb {fmt(f.get('mbps_tiempo_real'), 1):>4s} Mb "
+              f"{fmt(f.get('mbps_masivo'), 1):>4s} Mb {fmt(f.get('mbps_restringido'), 1):>4s} Mb  "
+              f"{f.get('cumple_video', '-')} / {f.get('cumple_web', '-')}")
+    print("\n    Voz y video: se miden en los dos sentidos; jitter, pérdida y MOS son los del peor.")
+    print("    Respaldo, descargas y Mbps por clase: telemetría de la sala (los dos sentidos); '1 GB en' = "
+          "cuánto tardaría un respaldo de 1 GB a ese ritmo.")
 
 
 def main():
@@ -334,12 +442,15 @@ def main():
     filas, contexto = [], []
     fecha = datetime.datetime.now().isoformat(timespec="seconds")
     objetivo_pagos = datos.get("objetivos", {}).get("pagos_p95_ms", 500)
+    from controlador.telemetria import leer_config
+    cfg_tel = leer_config()
+    telemetria = (cfg_tel["base_datos"], cfg_tel["intervalo_s"])
     try:
         emp.configurar(estrategia=ESTRATEGIAS[estrategias[0]])
         info("*** Esperando 8 s a que los switches se conecten a Ryu\n")
         time.sleep(8)
         gen = Generador(emp.net, emp.inventario, semilla=args.semilla, perfiles=perfiles)
-        total = sum(f["duracion_s"] + 6 for fs in planes.values() for f in fs) * len(estrategias)
+        total = sum(f["duracion_s"] + 12 for fs in planes.values() for f in fs) * len(estrategias)
         gen.levantar_servidores(duracion=total + 300)
         s = f"sa{args.sala}"
         for a, b in ((f"{s}tel", "ofpbx"), (f"{s}pos1", "inetpago1"), (f"{s}cli1", "inetstr")):
@@ -368,8 +479,9 @@ def main():
                 for fase in planes[nombre]:
                     info(f"    fase {fase['nombre']} ({fase['duracion_s']} s, {reloj.describir()})\n")
                     franja_ini = motor.actual if motor else None
-                    fila, t0, t1 = correr_fase(emp, gen, args.sala, fase, datos.get("sondas", {}), m,
-                                               reloj, nombre, estrategia)
+                    fila, t0, t1 = correr_fase(emp, gen, args.sala, fase, sondas_de(datos, nombre), m,
+                                               reloj, nombre, estrategia, telemetria=telemetria,
+                                               objetivos=datos.get("objetivos", {}))
                     if motor:
                         fila["franja"] = (franja_ini if franja_ini == motor.actual
                                           else f"{franja_ini}->{motor.actual}")
@@ -398,7 +510,8 @@ def main():
     imprimir(filas)
     print(f"\n    Objetivos: voz (jitter < {m.OBJETIVOS['jitter_ms']:g} ms, pérdida < {m.OBJETIVOS['perdida_pct']:g} %, "
           f"latencia p95 < {m.OBJETIVOS['latencia_ms']:g} ms, MOS >= {m.OBJETIVOS['mos']:g}); "
-          f"pagos p95 <= {objetivo_pagos} ms y sin errores.")
+          f"pagos p95 <= {objetivo_pagos} ms y sin errores; video (jitter, pérdida, latencia p95 como la voz, "
+          f"sin MOS); web p95 <= {datos.get('objetivos', {}).get('web_p95_ms', 3000) / 1000:g} s.")
     print(f"*** Resultados agregados a {CSV}\n*** Contexto de cada fase (para la IA) en {CONTEXTO}")
 
 

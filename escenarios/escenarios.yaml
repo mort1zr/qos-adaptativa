@@ -17,14 +17,26 @@ reloj:
 # Sondas de medición en cada fase (además del tráfico de los perfiles):
 #   voz:   llamada entre el teléfono de la sala y la central, en los dos sentidos
 #          (latencia, jitter, pérdida y MOS; se evalúa por el peor sentido)
+#   video: videollamada de la caja con Teams, en los dos sentidos (~2.5 Mbps
+#          cada uno; latencia, jitter y pérdida, con los objetivos de la voz)
 #   pagos: un POS de la sala cobrando cada 2 s (tiempo de respuesta de cada pago)
+#   web:   la caja abre una página de ~800 KB cada 5 s (tiempo de carga): es
+#          tráfico "masivo" que sí ve una persona, para medir lo que cuesta priorizar
+# Un escenario puede apagar o cambiar sondas con su propia sección 'sondas'.
+# Además, de la telemetría se calcula en cada fase cuánto obtuvo cada clase y a
+# qué ritmo avanzaron el respaldo y las descargas.
 sondas:
   voz: true
+  video: {pps: 260, largo: 1200}
   pagos: {periodo_s: 2, peticion: 1500, respuesta: 3000}
+  web: {periodo_s: 5, peticion: 500, respuesta: 800000}
 
-# Objetivo de los pagos (los de la voz están en politicas/politicas.yaml)
+# Objetivos de los pagos y de la web (los de la voz y el video están en
+# politicas/politicas.yaml). 3 s es el tiempo de carga que la mayoría de las
+# personas tolera antes de abandonar una página.
 objetivos:
   pagos_p95_ms: 500
+  web_p95_ms: 3000
 
 escenarios:
   apertura:
@@ -104,6 +116,7 @@ escenarios:
       Martes 04:00, sala cerrada (3:00-8:00): casi sin uso, así que los
       respaldos y las descargas pueden usar todo el enlace.
     inicio: {dia: martes, hora: "04:00"}
+    sondas: {video: false, web: false}     # sala cerrada: nadie en la caja
     fases:
       - nombre: valle
         duracion_s: 90

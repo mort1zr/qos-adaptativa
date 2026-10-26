@@ -10,7 +10,8 @@ import unittest
 import yaml
 
 from escenarios.escenario import (ESCENARIOS, ESTRATEGIAS, EscenarioInvalido, cargar_escenarios,
-                                  guardar_csv, plan_escenario, poner_estrategia)
+                                  evaluar_udp, guardar_csv, metricas_telemetria, plan_escenario,
+                                  poner_estrategia, sondas_de)
 from escenarios.reloj import RelojSimulado, leer_reloj
 
 
@@ -131,6 +132,73 @@ class Estrategias(unittest.TestCase):
         self.assertEqual(len(avisos), 1)
         with self.assertRaises(RuntimeError):
             poner_estrategia(self.Emp(), "prioridad", cliente=self.Api(falla=True))
+
+
+class Metricas(unittest.TestCase):
+    """Sondas y métricas del punto 7: video, web y lo que obtiene cada clase."""
+
+    def test_sondas_generales_y_por_escenario(self):
+        d = cargar_escenarios()
+        self.assertEqual(set(sondas_de(d, "sorteo")), {"voz", "video", "pagos", "web"})
+        self.assertEqual(set(sondas_de(d, "madrugada")), {"voz", "pagos"})       # sala cerrada
+        self.assertEqual(d["objetivos"]["web_p95_ms"], 3000)
+
+    def test_sonda_desconocida(self):
+        d = base()
+        d["escenarios"]["sorteo"]["sondas"] = {"netflix": True}
+        with self.assertRaises(EscenarioInvalido) as ctx:
+            cargar_desde(d)
+        self.assertIn("netflix", str(ctx.exception))
+
+    def test_metricas_de_la_telemetria(self):
+        import sqlite3
+        db = os.path.join(tempfile.mkdtemp(), "t.db")
+        con = sqlite3.connect(db)
+        con.execute("CREATE TABLE flujos (ts REAL, sede_id INTEGER, clase TEXT, servicio TEXT, bytes INTEGER)")
+        filas = [(10, 1, "masivo", "respaldo", 75_000_000),       # 600 Mb en 60 s = 10 Mbps
+                 (15, 1, "masivo", "descargas", 37_500_000),      # 5 Mbps
+                 (15, 1, "tiempo_real", "voip", 750_000),         # 0.1 Mbps
+                 (15, 2, "masivo", "respaldo", 99_999_999),       # otra sala: no cuenta
+                 (99, 1, "masivo", "respaldo", 99_999_999)]       # fuera de la ventana
+        con.executemany("INSERT INTO flujos VALUES (?,?,?,?,?)", filas)
+        con.commit()
+        con.close()
+        r = metricas_telemetria(db, 1, 5, 60, 60)
+        self.assertEqual((r["respaldo_mbps"], r["descargas_mbps"], r["mbps_masivo"], r["mbps_tiempo_real"]),
+                         (10.0, 5.0, 15.0, 0.1))
+        self.assertEqual(r["respaldo_min_1gb"], 13.3)                 # 8000 Mb / 10 Mbps = 800 s
+        self.assertEqual(r["mbps_restringido"], 0.0)
+        self.assertEqual(metricas_telemetria(os.path.join(tempfile.mkdtemp(), "x", "no.db"), 1, 0, 1, 1), {})
+
+    def test_video_se_evalua_por_el_peor_sentido_y_sin_mos(self):
+        import json
+
+        class M:
+            OBJETIVOS = {"jitter_ms": 30, "perdida_pct": 1, "latencia_ms": 150, "mos": 4}
+
+            @staticmethod
+            def resultado_udp(ruta):
+                with open(ruta) as f:
+                    return json.load(f)
+
+            @staticmethod
+            def evaluar(f):
+                return "sí" if f["perdida_pct"] <= 1 and f["mos"] is None else "no (pérdida)"
+
+            @staticmethod
+            def mos(*a):
+                return 4.4
+
+        d = tempfile.mkdtemp()
+        rx = {}
+        for sentido, perdida in (("subida", 0.0), ("bajada", 2.5)):
+            ruta = os.path.join(d, sentido)
+            with open(ruta, "w") as f:
+                json.dump({"latencia_p95_ms": 12.0, "jitter_ms": 1.0, "perdida_pct": perdida}, f)
+            rx[sentido] = (None, ruta)
+        fila = evaluar_udp(M, rx, "video", con_mos=False)
+        self.assertEqual((fila["video_perdida_pct"], fila["cumple_video"]), (2.5, "no (pérdida)"))
+        self.assertNotIn("video_mos", fila)
 
 
 class Csv(unittest.TestCase):
