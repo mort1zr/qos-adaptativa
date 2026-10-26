@@ -5,6 +5,7 @@ Escenarios reproducibles de la empresa (historia PCIII-18).
   python3 escenarios/escenario.py --listar
   python3 escenarios/escenario.py --plan --nombre sorteo --ruido 0.1
   sudo python3 escenarios/escenario.py --nombre sorteo --estrategia fila_corta --sala 1
+  sudo python3 escenarios/escenario.py --nombre apertura,respaldo_en_atencion --estrategia prioridad,estatica
   sudo python3 escenarios/escenario.py --todos --estrategia sin_qos,fila_corta,prioridad --sala 4
 
 Levanta la red una sola vez y, para cada estrategia y cada escenario, recorre
@@ -19,7 +20,9 @@ Estrategias:
   prioridad   6 colas y el controlador manda cada flujo a la cola de su clase
               (set_queue, PCIII-19) reconociéndolo por la tabla de destinos
               (clasificador 'destino', PCIII-20); las tasas no cambian
-'estatica' (reglas por horario) llega en PCIII-21 e 'ia' en los Sprints 4-5.
+  estatica    lo mismo que prioridad + los techos por horario de
+              politicas/horario.yaml, según la hora simulada (PCIII-21)
+'ia' llega en los Sprints 4-5.
 La estrategia también fija el clasificador de Ryu, por su API REST.
 
 Con la misma --semilla el tráfico es el mismo; --ruido 0.1 varía cada
@@ -54,9 +57,12 @@ from trafico.generador import APLICACIONES, Generador, cargar_perfiles  # noqa: 
 ESCENARIOS = os.path.join(AQUI, "escenarios.yaml")
 CSV = os.path.join(RAIZ, "experimentos", "resultados", "escenarios.csv")
 CONTEXTO = os.path.join(RAIZ, "datos", "contexto.csv")
-ESTRATEGIAS = {"sin_qos": "sin_qos", "fila_corta": "colas", "prioridad": "colas"}  # -> colas de la topología
-CLASIFICADOR = {"sin_qos": "ninguno", "fila_corta": "ninguno", "prioridad": "destino"}  # -> clasificador de Ryu
-FUTURAS = {"estatica": "PCIII-21 (Sprint 3)", "ia": "los Sprints 4 y 5"}
+ESTRATEGIAS = {"sin_qos": "sin_qos", "fila_corta": "colas", "prioridad": "colas",
+               "estatica": "colas"}                                            # -> colas de la topología
+CLASIFICADOR = {"sin_qos": "ninguno", "fila_corta": "ninguno", "prioridad": "destino",
+                "estatica": "destino"}                                         # -> clasificador de Ryu
+CON_HORARIO = {"estatica"}                                                     # -> techos por horario
+FUTURAS = {"ia": "los Sprints 4 y 5"}
 PUERTO_VOZ = 5001
 
 
@@ -222,18 +228,29 @@ def correr_fase(emp, gen, sala, fase, sondas, m, reloj, nombre, estrategia):
 
 
 def guardar_csv(ruta, filas):
+    """Agrega filas al CSV. Si traen columnas nuevas, reescribe el archivo con el
+    encabezado ampliado (las filas viejas quedan con esas columnas vacías), en vez
+    de dejar columnas corridas."""
     if not filas:
         return
     os.makedirs(os.path.dirname(ruta), exist_ok=True)
-    nuevo = not os.path.exists(ruta)
-    campos = list(filas[0].keys())
-    for f in filas[1:]:
+    campos = []
+    for f in filas:
         campos += [k for k in f if k not in campos]
-    with open(ruta, "a", newline="") as fh:
+    previas, cabecera = [], []
+    if os.path.exists(ruta):
+        with open(ruta, newline="") as fh:
+            lector = csv.DictReader(fh)
+            cabecera, previas = list(lector.fieldnames or []), list(lector)
+    if cabecera and set(campos) <= set(cabecera):
+        with open(ruta, "a", newline="") as fh:
+            csv.DictWriter(fh, fieldnames=cabecera, extrasaction="ignore").writerows(filas)
+        return
+    campos = cabecera + [c for c in campos if c not in cabecera]
+    with open(ruta, "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=campos, extrasaction="ignore")
-        if nuevo:
-            w.writeheader()
-        w.writerows(filas)
+        w.writeheader()
+        w.writerows(previas + filas)
 
 
 def imprimir(filas):
@@ -256,10 +273,10 @@ def imprimir(filas):
 
 def main():
     p = argparse.ArgumentParser(description="Escenarios reproducibles de la empresa")
-    p.add_argument("--nombre", help="escenario a correr")
+    p.add_argument("--nombre", help="escenario a correr (o varios separados por coma)")
     p.add_argument("--todos", action="store_true", help="los 5 escenarios, uno tras otro")
     p.add_argument("--estrategia", default="fila_corta",
-                   help="sin_qos, fila_corta, prioridad (o varias separadas por coma)")
+                   help="sin_qos, fila_corta, prioridad, estatica (o varias separadas por coma)")
     p.add_argument("--sala", type=int, default=1, choices=[1, 2, 3, 4])
     p.add_argument("--semilla", type=int, default=7)
     p.add_argument("--ruido", type=float, default=0.0, help="variación aleatoria de las intensidades (0.1 = ±10 %%)")
@@ -277,8 +294,11 @@ def main():
             print(f"  {nombre:22s} {e['inicio']['dia']:9s} {e['inicio']['hora']}  {len(e['fases'])} fase(s), "
                   f"{dur} s\n      {e['descripcion']}")
         return
-    nombres = list(datos["escenarios"]) if args.todos else [args.nombre]
-    if not nombres or nombres == [None]:
+    if args.todos:
+        nombres = list(datos["escenarios"])
+    elif args.nombre:
+        nombres = [n.strip() for n in args.nombre.split(",") if n.strip()]
+    else:
         sys.exit("Indica --nombre <escenario> o --todos (ver --listar)")
     estrategias = [e.strip() for e in args.estrategia.split(",")]
     for e in estrategias:
@@ -328,15 +348,31 @@ def main():
              f"unos {total // 60 + 1} min\n")
         for estrategia in estrategias:
             poner_estrategia(emp, estrategia)
+            motor = None
+            if estrategia in CON_HORARIO:
+                from controlador.estatica import QoSEstatica, cargar_horario
+                motor = QoSEstatica(emp.colas, [(p, mb) for _, p, mb, _ in emp.puertos_acceso],
+                                    cargar_horario(emp.colas.pol), avisar=lambda t: info(t + "\n"))
             time.sleep(2)
             for nombre in nombres:
                 e = datos["escenarios"][nombre]
                 reloj = RelojSimulado(e["inicio"]["dia"], e["inicio"]["hora"], datos["reloj"]["factor"])
                 info(f"\n*** {nombre} · {estrategia} · empieza {reloj.describir()} (simulado)\n")
+                if motor:
+                    # La franja del inicio se aplica ANTES del tráfico; los cambios dentro
+                    # del escenario (p. ej. las 08:00 de la apertura) los aplica el hilo.
+                    reloj.guardar(nombre, planes[nombre][0]["nombre"], estrategia=estrategia, sala=args.sala)
+                    motor.paso()
+                    if not motor._hilo:
+                        motor.iniciar()
                 for fase in planes[nombre]:
                     info(f"    fase {fase['nombre']} ({fase['duracion_s']} s, {reloj.describir()})\n")
+                    franja_ini = motor.actual if motor else None
                     fila, t0, t1 = correr_fase(emp, gen, args.sala, fase, datos.get("sondas", {}), m,
                                                reloj, nombre, estrategia)
+                    if motor:
+                        fila["franja"] = (franja_ini if franja_ini == motor.actual
+                                          else f"{franja_ini}->{motor.actual}")
                     if "pagos_p95_ms" in fila:
                         ok = (fila["pagos_n"] > 0 and fila["pagos_errores"] == 0
                               and fila["pagos_p95_ms"] is not None and fila["pagos_p95_ms"] <= objetivo_pagos)
@@ -346,7 +382,10 @@ def main():
                     contexto.append({"inicio_real": round(t0, 3), "fin_real": round(t1, 3), "escenario": nombre,
                                      "estrategia": estrategia, "sala": args.sala, "fase": fase["nombre"],
                                      "inicio_simulado": reloj.simulado(t0).isoformat(timespec="minutes"),
-                                     "factor": reloj.factor, "semilla": args.semilla, "ruido": args.ruido})
+                                     "factor": reloj.factor, "semilla": args.semilla, "ruido": args.ruido,
+                                     "franja": fila.get("franja", "")})
+            if motor:
+                motor.detener()
     finally:
         try:
             gen.detener()

@@ -1,0 +1,27 @@
+# QoS estática por horario (historia PCIII-21).
+#
+# Es lo que configuraría un administrador de salas con reglas fijas: los
+# carriles de politicas.yaml (estrategia 'prioridad') más algunos límites que
+# cambian según la HORA, nunca según lo que esté pasando en la red. Justo eso
+# es lo que la IA tendrá que superar: el horario no sabe si hoy hay un sorteo,
+# si el enlace se degradó o si el respaldo se atrasó.
+#
+# Cada franja indica el techo (% del enlace) de las clases que cambia; las
+# demás clases y todas las garantías quedan como en politicas.yaml. Las franjas
+# deben cubrir las 24 horas sin pisarse ('hasta' puede pasar de medianoche).
+# El WiFi de clientes ya tiene su tope fijo en politicas.yaml (20 %).
+#
+# La hora es la del reloj simulado de los escenarios (datos/reloj.json).
+
+franjas:
+  - nombre: atencion
+    descripcion: "Sala abierta: respaldos, descargas y navegación no pasan del 30 % del enlace"
+    desde: "08:00"
+    hasta: "03:00"
+    techos_pct: {masivo: 30}
+
+  - nombre: cerrada
+    descripcion: "Sala cerrada: respaldos y descargas pueden usar todo el enlace"
+    desde: "03:00"
+    hasta: "08:00"
+    techos_pct: {}            # los de politicas.yaml (masivo hasta 100 %)

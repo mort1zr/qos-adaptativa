@@ -10,7 +10,7 @@ import unittest
 import yaml
 
 from escenarios.escenario import (ESCENARIOS, ESTRATEGIAS, EscenarioInvalido, cargar_escenarios,
-                                  plan_escenario, poner_estrategia)
+                                  guardar_csv, plan_escenario, poner_estrategia)
 from escenarios.reloj import RelojSimulado, leer_reloj
 
 
@@ -115,7 +115,8 @@ class Estrategias(unittest.TestCase):
     def test_cada_estrategia_pide_su_clasificador(self):
         esperado = {"sin_qos": ("una_cola", "fifo", "ninguno"),
                     "fila_corta": ("colas", "pfifo:64", "ninguno"),
-                    "prioridad": ("colas", "pfifo:64", "destino")}
+                    "prioridad": ("colas", "pfifo:64", "destino"),
+                    "estatica": ("colas", "pfifo:64", "destino")}
         self.assertEqual(set(esperado), set(ESTRATEGIAS))
         for estrategia, (colas, hoja, clasificador) in esperado.items():
             emp, cliente = self.Emp(), self.Api()
@@ -130,6 +131,19 @@ class Estrategias(unittest.TestCase):
         self.assertEqual(len(avisos), 1)
         with self.assertRaises(RuntimeError):
             poner_estrategia(self.Emp(), "prioridad", cliente=self.Api(falla=True))
+
+
+class Csv(unittest.TestCase):
+    def test_columnas_nuevas_no_corren_las_viejas(self):
+        import csv
+        ruta = os.path.join(tempfile.mkdtemp(), "r.csv")
+        guardar_csv(ruta, [{"escenario": "sorteo", "voz": 10}])
+        guardar_csv(ruta, [{"escenario": "sorteo", "voz": 11}])                    # mismas columnas: agrega
+        guardar_csv(ruta, [{"escenario": "apertura", "franja": "cerrada->atencion", "voz": 12}])
+        with open(ruta, newline="") as f:
+            filas = list(csv.DictReader(f))
+        self.assertEqual([f["voz"] for f in filas], ["10", "11", "12"])
+        self.assertEqual([f["franja"] for f in filas], ["", "", "cerrada->atencion"])
 
 
 class Reloj(unittest.TestCase):
