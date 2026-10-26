@@ -1,0 +1,32 @@
+# Corridas excluidas del análisis, con su motivo. Los datos crudos NO se borran:
+# quedan en sus CSV, y aquí se explica por qué no cuentan.
+#
+# Cada entrada indica el archivo y las columnas que identifican las filas (todas
+# deben coincidir): fecha, campana, escenario, estrategia, fase, sala, semilla.
+# experimentos/analisis.py aplica las de comparacion.csv; las de escenarios.csv
+# (pruebas exploratorias, que no entran en la comparación) quedan como registro.
+
+descartes:
+  - archivo: escenarios.csv
+    fecha: "2026-10-26T00:17:13"
+    escenario: apertura
+    estrategia: estatica
+    fase: estable
+    motivo: >-
+      Corte total de ~13 s (uso 4/2 %, voz con 47 % de pérdida pero p95 de 11 ms):
+      pausa de la VM. Repetida a las 00:36 sin el corte (PCIII-21).
+
+  - archivo: escenarios.csv
+    fecha: "2026-10-26T01:29:05"
+    motivo: >-
+      Error del simulador del operador: al terminar la fase degradada el enlace
+      quedó limitado a 15 Mbps (netem conserva 'rate' con 'replace'). Todo lo
+      posterior a la primera fase degradada quedó contaminado. Corregido y repetido
+      a las 10:18.
+
+  - archivo: escenarios.csv
+    fecha: "2026-10-25T17:27:29"
+    motivo: >-
+      No es un error: corrida del Sprint 2, antes de las sondas de video y web, del
+      goodput y de las estrategias prioridad y estatica. No es comparable con la
+      campaña; queda como evidencia de PCIII-18.

@@ -9,8 +9,8 @@ import unittest
 import yaml
 
 from escenarios.escenario import (ESCENARIOS, ESTRATEGIAS, EscenarioInvalido, cargar_escenarios,
-                                  evaluar_udp, goodput_masivo, guardar_csv, metricas_telemetria,
-                                  plan_escenario,
+                                  cpu_pct, evaluar_udp, goodput_masivo, guardar_csv, metricas_telemetria,
+                                  plan_escenario, validez,
                                   poner_estrategia, sondas_de)
 from escenarios.reloj import RelojSimulado, leer_reloj
 
@@ -170,6 +170,13 @@ class Metricas(unittest.TestCase):
                          (15.0, 0.1, 0.0))
         self.assertEqual(metricas_telemetria(os.path.join(tempfile.mkdtemp(), "x", "no.db"), 1, 0, 1, 1), {})
 
+    def test_cpu_y_validez_de_la_fase(self):
+        self.assertEqual(cpu_pct((100, 1000), (550, 1500)), 90.0)        # 450 de 500 ocupados
+        self.assertIsNone(cpu_pct(None, (1, 2)))
+        self.assertEqual(validez(45.0), "sí")
+        self.assertEqual(validez(None), "sí")
+        self.assertEqual(validez(93.4), "no (CPU 93 %)")
+
     def test_goodput_del_respaldo(self):
         self.assertEqual(goodput_masivo({"respaldo": 10.0, "descargas": 5.0}),
                          {"respaldo_goodput_mbps": 10.0, "descargas_goodput_mbps": 5.0,
@@ -287,6 +294,23 @@ class Operador_(unittest.TestCase):
 
 
 class Csv(unittest.TestCase):
+    @unittest.skipUnless(hasattr(os, "geteuid") and os.geteuid() == 0, "solo con sudo")
+    def test_el_archivo_vuelve_al_usuario_de_sudo(self):
+        from escenarios.escenario import devolver_al_usuario
+        ruta = os.path.join(tempfile.mkdtemp(), "r.csv")
+        open(ruta, "w").close()
+        viejo = {k: os.environ.get(k) for k in ("SUDO_UID", "SUDO_GID")}
+        os.environ.update(SUDO_UID="65534", SUDO_GID="65534")
+        try:
+            devolver_al_usuario(ruta)
+        finally:
+            for k, v in viejo.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        self.assertEqual((os.stat(ruta).st_uid, os.stat(ruta).st_gid), (65534, 65534))
+
     def test_columnas_nuevas_no_corren_las_viejas(self):
         import csv
         ruta = os.path.join(tempfile.mkdtemp(), "r.csv")

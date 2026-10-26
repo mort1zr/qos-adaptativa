@@ -71,6 +71,7 @@ FUTURAS = {"ia": "los Sprints 4 y 5"}
 PUERTO_VOZ = 5001
 PUERTO_VIDEO = 5002
 SONDAS = {"voz", "video", "pagos", "web"}
+CPU_MAXIMA_PCT = 90      # sobre esto, la fase se marca inválida: la VM fue el cuello de botella
 CLASES_TELEMETRIA = ("tiempo_real", "critico", "negocio", "vigilancia", "masivo", "restringido")
 
 
@@ -159,6 +160,30 @@ def poner_estrategia(emp, estrategia, cliente=api, avisar=print):
         if clasificador != "ninguno":
             raise
         avisar("    (aviso: sin la API de Ryu no se pudo confirmar el clasificador 'ninguno')")
+
+
+def cpu_jiffies():
+    """(ocupado, total) de la CPU de la máquina, de /proc/stat (todas las CPU)."""
+    try:
+        with open("/proc/stat") as f:
+            v = [int(x) for x in f.readline().split()[1:]]
+    except (OSError, ValueError):
+        return None
+    inactivo = v[3] + (v[4] if len(v) > 4 else 0)          # idle + iowait
+    return sum(v) - inactivo, sum(v)
+
+
+def cpu_pct(antes, despues):
+    if not antes or not despues or despues[1] <= antes[1]:
+        return None
+    return round(100 * (despues[0] - antes[0]) / (despues[1] - antes[1]), 1)
+
+
+def validez(cpu):
+    """Una fase es válida si la VM no fue el cuello de botella (lo medido es la red, no la CPU)."""
+    if cpu is not None and cpu >= CPU_MAXIMA_PCT:
+        return f"no (CPU {cpu:.0f} %)"
+    return "sí"
 
 
 def sonda_udp(m, a, b, puerto, perfil, dur, sonda_dur):
@@ -275,7 +300,7 @@ def correr_fase(emp, gen, sala, fase, sondas, m, reloj, nombre, estrategia, tele
                 os.remove(rutas[k])
     time.sleep(2)
     b0 = {k: emp.colas.bytes_enviados(p) for k, p in cuellos.items()}
-    tb0 = time.time()
+    tb0, c0 = time.time(), cpu_jiffies()
     procesos = []
     for rx, (a, b, puerto, perfil, sd) in udp.values():
         procesos.append(m.emisor_udp(a, b.IP(), puerto, perfil, sd))
@@ -296,7 +321,7 @@ def correr_fase(emp, gen, sala, fase, sondas, m, reloj, nombre, estrategia, tele
     restante = dur - (time.time() - t0)
     time.sleep(max(0, restante - 2))
     b1 = {k: emp.colas.bytes_enviados(p) for k, p in cuellos.items()}
-    tb1 = time.time()
+    tb1, c1 = time.time(), cpu_jiffies()
     for p in procesos:
         m.esperar(p, limite=20)
     for rx, _ in udp.values():
@@ -311,7 +336,8 @@ def correr_fase(emp, gen, sala, fase, sondas, m, reloj, nombre, estrategia, tele
     fila = {"fase": fase["nombre"], "hora_simulada": hora, "duracion_s": dur,
             "uso_bajada_pct": round(uso["bajada"], 1), "uso_subida_pct": round(uso["subida"], 1),
             "enlace_capacidad_pct": enlace["capacidad_pct"], "enlace_perdida_pct": enlace["perdida_pct"],
-            "enlace_retardo_ms": enlace["retardo_ms"]}
+            "enlace_retardo_ms": enlace["retardo_ms"], "cpu_pct": cpu_pct(c0, c1)}
+    fila["valida"] = validez(fila["cpu_pct"])
     if "voz" in udp:
         fila.update(evaluar_udp(m, udp["voz"][0], "voz", con_mos=True))
     if "video" in udp:
@@ -337,6 +363,19 @@ def correr_fase(emp, gen, sala, fase, sondas, m, reloj, nombre, estrategia, tele
     return fila, t0, t1
 
 
+def devolver_al_usuario(ruta):
+    """Los scripts corren con sudo: el archivo que crean queda de root, y después los
+    que corren sin sudo (análisis, consultas, git) no pueden escribirlo. Se lo
+    devuelve al usuario que llamó a sudo."""
+    uid, gid = os.environ.get("SUDO_UID"), os.environ.get("SUDO_GID")
+    if uid and gid and os.geteuid() == 0 and os.path.exists(ruta):
+        try:
+            os.chown(ruta, int(uid), int(gid))
+            os.chown(os.path.dirname(ruta), int(uid), int(gid))
+        except OSError:
+            pass
+
+
 def guardar_csv(ruta, filas):
     """Agrega filas al CSV. Si traen columnas nuevas, reescribe el archivo con el
     encabezado ampliado (las filas viejas quedan con esas columnas vacías), en vez
@@ -355,12 +394,14 @@ def guardar_csv(ruta, filas):
     if cabecera and set(campos) <= set(cabecera):
         with open(ruta, "a", newline="") as fh:
             csv.DictWriter(fh, fieldnames=cabecera, extrasaction="ignore").writerows(filas)
+        devolver_al_usuario(ruta)
         return
     campos = cabecera + [c for c in campos if c not in cabecera]
     with open(ruta, "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=campos, extrasaction="ignore")
         w.writeheader()
         w.writerows(previas + filas)
+    devolver_al_usuario(ruta)
 
 
 def enlace_degradado(fila: dict) -> bool:
@@ -413,7 +454,7 @@ def imprimir(filas):
 def main():
     p = argparse.ArgumentParser(description="Escenarios reproducibles de la empresa")
     p.add_argument("--nombre", help="escenario a correr (o varios separados por coma)")
-    p.add_argument("--todos", action="store_true", help="los 5 escenarios, uno tras otro")
+    p.add_argument("--todos", action="store_true", help="todos los escenarios, uno tras otro")
     p.add_argument("--estrategia", default="fila_corta",
                    help="sin_qos, fila_corta, prioridad, estatica (o varias separadas por coma)")
     p.add_argument("--sala", type=int, default=1, choices=[1, 2, 3, 4])
@@ -458,38 +499,71 @@ def main():
 
     if os.geteuid() != 0:
         sys.exit("Ejecuta con sudo (levanta la red de Mininet)")
+    filas, contexto = [], []
+
+    def guardar_escenario(f, c):
+        filas.extend(f)
+        contexto.extend(c)
+    try:
+        ejecutar(datos, perfiles, nombres, estrategias, args.sala, args.semilla, args.ruido, args.escala,
+                 args.datapath, al_terminar=guardar_escenario)
+    finally:
+        guardar_csv(CSV, filas)
+        guardar_csv(CONTEXTO, contexto)
+    imprimir(filas)
+    imprimir_objetivos(datos)
+    print(f"*** Resultados agregados a {CSV}\n*** Contexto de cada fase (para la IA) en {CONTEXTO}")
+
+
+def imprimir_objetivos(datos):
+    import medicion as m
+    o = datos.get("objetivos", {})
+    print(f"\n    Objetivos: voz (jitter < {m.OBJETIVOS['jitter_ms']:g} ms, pérdida < {m.OBJETIVOS['perdida_pct']:g} %, "
+          f"latencia p95 < {m.OBJETIVOS['latencia_ms']:g} ms, MOS >= {m.OBJETIVOS['mos']:g}); "
+          f"pagos p95 <= {o.get('pagos_p95_ms', 500)} ms y sin errores; video (jitter, pérdida, latencia p95 como "
+          f"la voz, sin MOS); web p95 <= {o.get('web_p95_ms', 3000) / 1000:g} s.")
+
+
+def ejecutar(datos, perfiles, nombres, estrategias, sala, semilla=7, ruido=0.0, escala=1.0, datapath="kernel",
+             al_terminar=None, extra=None):
+    """Levanta la red, corre los escenarios 'nombres' con cada estrategia en la sala y la
+    apaga. Al terminar cada escenario llama a al_terminar(filas, contexto) con sus filas
+    (así una corrida larga guarda lo hecho aunque después se interrumpa). 'extra' son
+    columnas que se agregan a cada fila (p. ej. el nombre de la campaña)."""
     from mininet.log import info, setLogLevel
     from empresa_xyz import AVISO_RYU, CONFIG_DEFECTO, EmpresaXYZ, controlador_activo
     import medicion as m
     if not controlador_activo():
-        sys.exit(AVISO_RYU.format(ip="127.0.0.1", puerto=6633))
+        raise RuntimeError(AVISO_RYU.format(ip="127.0.0.1", puerto=6633))
     if any(CLASIFICADOR[e] != "ninguno" for e in estrategias) and not api.disponible():
-        sys.exit(api.AVISO.format(url=api.URL))
+        raise RuntimeError(api.AVISO.format(url=api.URL))
+    extra = extra or {}
+    planes = {n: plan_escenario(datos, n, semilla, ruido, escala) for n in nombres}
     setLogLevel("info")
     with open(CONFIG_DEFECTO) as f:
         cfg = yaml.safe_load(f)
-    emp = EmpresaXYZ(cfg, datapath=args.datapath)
+    emp = EmpresaXYZ(cfg, datapath=datapath)
     emp.construir()
     emp.net.start()
-    filas, contexto = [], []
     fecha = datetime.datetime.now().isoformat(timespec="seconds")
     objetivo_pagos = datos.get("objetivos", {}).get("pagos_p95_ms", 500)
     from controlador.telemetria import leer_config
     cfg_tel = leer_config()
     telemetria = (cfg_tel["base_datos"], cfg_tel["intervalo_s"])
+    gen = operador = motor = None
     try:
         emp.configurar(estrategia=ESTRATEGIAS[estrategias[0]])
         operador = Operador.de_empresa(emp, avisar=lambda t: info(t + "\n"))
         info("*** Esperando 8 s a que los switches se conecten a Ryu\n")
         time.sleep(8)
-        gen = Generador(emp.net, emp.inventario, semilla=args.semilla, perfiles=perfiles)
-        total = sum(f["duracion_s"] + 12 for fs in planes.values() for f in fs) * len(estrategias)
-        gen.levantar_servidores(duracion=total + 300)
-        s = f"sa{args.sala}"
+        gen = Generador(emp.net, emp.inventario, semilla=semilla, perfiles=perfiles)
+        total = sum(f["duracion_s"] + 15 for fs in planes.values() for f in fs) * len(estrategias)
+        gen.levantar_servidores(duracion=total + 600)
+        s = f"sa{sala}"
         for a, b in ((f"{s}tel", "ofpbx"), (f"{s}pos1", "inetpago1"), (f"{s}cli1", "inetstr")):
             emp.net.get(a).cmd(f"ping -c2 -W2 {emp.net.get(b).IP()}")
-        info(f"*** {len(nombres)} escenario(s) x {len(estrategias)} estrategia(s) en la Sala {args.sala}: "
-             f"unos {total // 60 + 1} min\n")
+        info(f"*** {len(nombres)} escenario(s) x {len(estrategias)} estrategia(s) en la Sala {sala}, "
+             f"semilla {semilla}: unos {total // 60 + 1} min\n")
         for estrategia in estrategias:
             poner_estrategia(emp, estrategia)
             motor = None
@@ -505,14 +579,15 @@ def main():
                 if motor:
                     # La franja del inicio se aplica ANTES del tráfico; los cambios dentro
                     # del escenario (p. ej. las 08:00 de la apertura) los aplica el hilo.
-                    reloj.guardar(nombre, planes[nombre][0]["nombre"], estrategia=estrategia, sala=args.sala)
+                    reloj.guardar(nombre, planes[nombre][0]["nombre"], estrategia=estrategia, sala=sala)
                     motor.paso()
                     if not motor._hilo:
                         motor.iniciar()
+                filas, contexto = [], []
                 for fase in planes[nombre]:
                     info(f"    fase {fase['nombre']} ({fase['duracion_s']} s, {reloj.describir()})\n")
                     franja_ini = motor.actual if motor else None
-                    fila, t0, t1 = correr_fase(emp, gen, args.sala, fase, sondas_de(datos, nombre), m,
+                    fila, t0, t1 = correr_fase(emp, gen, sala, fase, sondas_de(datos, nombre), m,
                                                reloj, nombre, estrategia, telemetria=telemetria,
                                                objetivos=datos.get("objetivos", {}), operador=operador)
                     if motor:
@@ -522,34 +597,31 @@ def main():
                         ok = (fila["pagos_n"] > 0 and fila["pagos_errores"] == 0
                               and fila["pagos_p95_ms"] is not None and fila["pagos_p95_ms"] <= objetivo_pagos)
                         fila["cumple_pagos"] = "sí" if ok else "no"
-                    filas.append({"fecha": fecha, "escenario": nombre, "estrategia": estrategia,
-                                  "sala": args.sala, "semilla": args.semilla, "ruido": args.ruido, **fila})
-                    contexto.append({"inicio_real": round(t0, 3), "fin_real": round(t1, 3), "escenario": nombre,
-                                     "estrategia": estrategia, "sala": args.sala, "fase": fase["nombre"],
+                    filas.append({**extra, "fecha": fecha, "escenario": nombre, "estrategia": estrategia,
+                                  "sala": sala, "semilla": semilla, "ruido": ruido, **fila})
+                    contexto.append({**extra, "inicio_real": round(t0, 3), "fin_real": round(t1, 3),
+                                     "escenario": nombre, "estrategia": estrategia, "sala": sala,
+                                     "fase": fase["nombre"],
                                      "inicio_simulado": reloj.simulado(t0).isoformat(timespec="minutes"),
-                                     "factor": reloj.factor, "semilla": args.semilla, "ruido": args.ruido,
+                                     "factor": reloj.factor, "semilla": semilla, "ruido": ruido,
                                      "franja": fila.get("franja", "")})
+                if al_terminar:
+                    al_terminar(filas, contexto)
             if motor:
                 motor.detener()
+                motor = None
     finally:
-        try:
+        if motor:
+            motor.detener()
+        if gen:
             gen.detener()
-        except NameError:
-            pass
-        try:
-            operador.normalizar()
-        except Exception:
-            pass
+        if operador:
+            try:
+                operador.normalizar()
+            except Exception:
+                pass
         emp.limpiar()
         emp.net.stop()
-        guardar_csv(CSV, filas)
-        guardar_csv(CONTEXTO, contexto)
-    imprimir(filas)
-    print(f"\n    Objetivos: voz (jitter < {m.OBJETIVOS['jitter_ms']:g} ms, pérdida < {m.OBJETIVOS['perdida_pct']:g} %, "
-          f"latencia p95 < {m.OBJETIVOS['latencia_ms']:g} ms, MOS >= {m.OBJETIVOS['mos']:g}); "
-          f"pagos p95 <= {objetivo_pagos} ms y sin errores; video (jitter, pérdida, latencia p95 como la voz, "
-          f"sin MOS); web p95 <= {datos.get('objetivos', {}).get('web_p95_ms', 3000) / 1000:g} s.")
-    print(f"*** Resultados agregados a {CSV}\n*** Contexto de cada fase (para la IA) en {CONTEXTO}")
 
 
 if __name__ == "__main__":
