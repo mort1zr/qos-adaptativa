@@ -73,11 +73,13 @@ def mostrar_decisiones(filas, minutos):
         print(f"Sin decisiones del controlador en los últimos {minutos:g} minutos.")
         return
     print(f"Decisiones del controlador (una por flujo nuevo) en los últimos {minutos:g} minutos:")
-    print(f"  {'Clasificador':12s} {'Clase':12s} {'Cola':>4s} {'Flujos':>7s} {'p50':>8s} {'p95':>8s} {'Máx.':>8s}")
+    print(f"  {'Clasificador':12s} {'Clase':12s} {'Cola':>4s} {'Flujos':>7s} {'Por adel.':>9s} "
+          f"{'p50':>8s} {'p95':>8s} {'Máx.':>8s}")
     for f in filas:
-        print(f"  {f['clasificador']:12s} {f['clase']:12s} {f['cola']:>4} {f['decisiones']:>7} "
+        print(f"  {f['clasificador']:12s} {f['clase']:12s} {f['cola']:>4} {f['decisiones']:>7} {f['proactivas']:>9} "
               f"{f['p50_ms']:5.2f} ms {f['p95_ms']:5.2f} ms {f['max_ms']:5.2f} ms")
-    print("  (tiempo desde que llega el primer paquete hasta que la regla con su cola sale al switch)")
+    print("  (tiempo desde que llega el primer paquete hasta que la regla con su cola sale al switch;\n"
+          "   'por adelantado': flujos que ya iban a su cola por una regla instalada antes, sin esperar)")
 
 
 def main():

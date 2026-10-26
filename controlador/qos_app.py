@@ -1,6 +1,6 @@
 """
-Aplicación Ryu del proyecto (historias PCIII-16: telemetría, y PCIII-19: cada
-flujo a su cola).
+Aplicación Ryu del proyecto (historias PCIII-16: telemetría, PCIII-19: cada
+flujo a su cola, y PCIII-20: clasificación por destino con reglas por adelantado).
 
 Reemplaza a ryu.app.simple_switch_13. Arranque, desde ~/qos-adaptativa y con el
 .venv activo (Python 3.9):
@@ -21,7 +21,12 @@ Qué hace:
 
 Clasificadores (controlador/clasificadores.py):
   ninguno   sin set_queue: todo a la cola por defecto (sin_qos, fila_corta).
-  politica  la clase que dice politicas/politicas.yaml (estrategia prioridad).
+  politica  la clase que dice politicas/politicas.yaml sabiendo todo del destino.
+  destino   tabla de destinos conocidos (estrategia prioridad). Además instala
+            reglas POR ADELANTADO (proactivas) para esos destinos: el tráfico va
+            a su cola desde el primer paquete, sin esperar al controlador, y una
+            copia del primer paquete le llega al controlador solo para crear la
+            regla por flujo que cuenta los bytes (la telemetría no se pierde).
 El inicial está en controlador/telemetria.yaml ('clasificador'); se cambia en
 caliente con la API REST, que solo escucha en esta máquina:
 
@@ -56,13 +61,17 @@ from ryu.lib.packet import ether_types, ethernet, ipv4, packet  # noqa: E402
 from ryu.ofproto import ofproto_v1_3  # noqa: E402
 from webob import Response  # noqa: E402
 
-from controlador.clasificadores import CLASIFICADORES, armar_flujo, crear  # noqa: E402
+from controlador.clasificadores import CLASIFICADORES, armar_flujo, crear, red_para_openflow  # noqa: E402
 from controlador.inventario import Inventario  # noqa: E402
 from controlador.telemetria import Telemetria, leer_config, percentil  # noqa: E402
 from politicas.cargador import cargar  # noqa: E402
 
 COOKIE_FLUJO = 0x16          # reglas por flujo de esta aplicación (las de prueba de PCIII-15 usan 0x15)
+COOKIE_PROACTIVA = 0x20      # reglas por adelantado (PCIII-20)
 PRIORIDAD_FLUJO = 10
+PRIORIDAD_PROACTIVA = 8
+COPIA_BYTES = 128            # de la copia al controlador basta con las cabeceras
+RECIENTE_S = 2.0             # no reinstalar la misma regla por flujo dentro de este tiempo
 PRIORIDAD_ARP = 5
 PRIORIDAD_L2 = 1
 API = "qos_app"
@@ -93,6 +102,8 @@ class QoSApp(app_manager.RyuApp):
         self._partes = {}            # dpid -> estadísticas de flujos recibidas en varias partes
         self._decisiones = []        # se guardan en la base en cada sondeo
         self._ms = collections.deque(maxlen=2000)
+        self._recientes = {}         # (dpid, in_port, origen, destino, proto) -> ts de la regla instalada
+        self.proactivas = {}         # dpid -> reglas por adelantado instaladas
         self.contadores = {"packet_in": 0, "packet_in_acceso": 0, "decisiones": 0,
                            "cambios_clasificador": 0}
         kwargs["wsgi"].register(QoSRest, {API: self})
@@ -140,7 +151,28 @@ class QoSApp(app_manager.RyuApp):
                 self.agregar_flujo(dp, PRIORIDAD_ARP,
                                    parser.OFPMatch(in_port=entra, eth_type=ether_types.ETH_TYPE_ARP),
                                    [parser.OFPActionOutput(self.otro_puerto(sw, entra))])
-            self.logger.info("Switch de acceso %s (sede %s) conectado", sw["nombre"], sw["sede_id"])
+            n = self._instalar_proactivas(dp, sw)
+            self.logger.info("Switch de acceso %s (sede %s) conectado%s", sw["nombre"], sw["sede_id"],
+                             f"; {n} reglas por adelantado" if n else "")
+
+    def _instalar_proactivas(self, dp, sw):
+        """Reglas por adelantado del clasificador para los destinos conocidos, en los dos
+        sentidos. Llevan su cola y una copia del paquete al controlador (solo las
+        cabeceras), para que la regla por flujo de la telemetría se cree igual."""
+        ofp, parser = dp.ofproto, dp.ofproto_parser
+        reglas = self.clasificador.reglas_proactivas(list(self.inv.por_ip.values()), sw["sede_id"])
+        for r in reglas:
+            cola = self.pol.cola(r.clase)
+            for entra, origen, destino in ((sw["puerto_sede"], r.local, r.remota),
+                                           (sw["puerto_operador"], r.remota, r.local)):
+                match = parser.OFPMatch(in_port=entra, eth_type=ether_types.ETH_TYPE_IP,
+                                        ipv4_src=red_para_openflow(origen), ipv4_dst=red_para_openflow(destino))
+                acciones = [parser.OFPActionSetQueue(cola),
+                            parser.OFPActionOutput(self.otro_puerto(sw, entra)),
+                            parser.OFPActionOutput(ofp.OFPP_CONTROLLER, COPIA_BYTES)]
+                self.agregar_flujo(dp, PRIORIDAD_PROACTIVA, match, acciones, cookie=COOKIE_PROACTIVA)
+        self.proactivas[dp.id] = 2 * len(reglas)
+        return 2 * len(reglas)
 
     @set_ev_cls(ofp_event.EventOFPStateChange, [MAIN_DISPATCHER, DEAD_DISPATCHER])
     def al_cambiar_estado(self, ev):
@@ -170,19 +202,33 @@ class QoSApp(app_manager.RyuApp):
             ip = pkt.get_protocol(ipv4.ipv4)
             if ip:
                 self.contadores["packet_in_acceso"] += 1
+                # Copia de una regla por adelantado: el paquete YA salió por su cola;
+                # solo falta la regla por flujo que cuenta sus bytes.
+                copia = msg.reason == ofp.OFPR_ACTION
                 flujo = armar_flujo(self.inv, sw, ip.src, ip.dst, ip.proto, in_port)
                 decision = self.clasificador.clasificar(flujo)
                 cola = self.pol.cola(decision.clase)
                 acciones = self.acciones_flujo(dp, cola, salida)
-                match = parser.OFPMatch(in_port=in_port, eth_type=ether_types.ETH_TYPE_IP,
-                                        ipv4_src=ip.src, ipv4_dst=ip.dst, ip_proto=ip.proto)
-                self.agregar_flujo(dp, PRIORIDAD_FLUJO, match, acciones,
-                                   idle=self.cfg["idle_timeout_s"], cookie=COOKIE_FLUJO,
-                                   flags=ofp.OFPFF_SEND_FLOW_REM, buffer_id=msg.buffer_id)
-                if msg.buffer_id == ofp.OFP_NO_BUFFER:
+                clave = (dp.id, in_port, ip.src, ip.dst, ip.proto)
+                nueva = time.time() - self._recientes.get(clave, 0) > RECIENTE_S
+                if nueva:
+                    self._recientes[clave] = time.time()
+                    match = parser.OFPMatch(in_port=in_port, eth_type=ether_types.ETH_TYPE_IP,
+                                            ipv4_src=ip.src, ipv4_dst=ip.dst, ip_proto=ip.proto)
+                    buffer_id = None if copia else msg.buffer_id
+                    self.agregar_flujo(dp, PRIORIDAD_FLUJO, match, acciones,
+                                       idle=self.cfg["idle_timeout_s"], cookie=COOKIE_FLUJO,
+                                       flags=ofp.OFPFF_SEND_FLOW_REM, buffer_id=buffer_id)
+                    if not copia and msg.buffer_id != ofp.OFP_NO_BUFFER:
+                        self._anotar(dp.id, flujo, decision, cola, (time.perf_counter() - t0) * 1000, "reactiva")
+                        return
+                if not copia:
+                    datos = msg.data if msg.buffer_id == ofp.OFP_NO_BUFFER else None
                     dp.send_msg(parser.OFPPacketOut(datapath=dp, buffer_id=msg.buffer_id, in_port=in_port,
-                                                    actions=acciones, data=msg.data))
-                self._anotar(dp.id, flujo, decision, cola, (time.perf_counter() - t0) * 1000)
+                                                    actions=acciones, data=datos))
+                if nueva:
+                    self._anotar(dp.id, flujo, decision, cola, (time.perf_counter() - t0) * 1000,
+                                 "proactiva" if copia else "reactiva")
                 return
             acciones = [parser.OFPActionOutput(salida)]
         else:
@@ -201,7 +247,7 @@ class QoSApp(app_manager.RyuApp):
         dp.send_msg(parser.OFPPacketOut(datapath=dp, buffer_id=msg.buffer_id, in_port=in_port,
                                         actions=acciones, data=datos))
 
-    def _anotar(self, dpid, flujo, decision, cola, ms):
+    def _anotar(self, dpid, flujo, decision, cola, ms, via):
         self.contadores["decisiones"] += 1
         self._ms.append(ms)
         local = flujo.local
@@ -211,7 +257,8 @@ class QoSApp(app_manager.RyuApp):
             "origen_ip": flujo.origen_ip, "destino_ip": flujo.destino_ip, "proto": flujo.proto,
             "origen": o["nombre"] if o else flujo.origen_ip, "destino": d["nombre"] if d else flujo.destino_ip,
             "area": local["area"] if local else "Desconocida", "clasificador": self.clasificador.nombre,
-            "clase": decision.clase, "cola": cola, "motivo": decision.motivo, "ms": round(ms, 3)})
+            "clase": decision.clase, "cola": cola, "motivo": decision.motivo, "ms": round(ms, 3),
+            "servicio": decision.servicio, "via": via})
 
     # ---------------- clasificador (API) ----------------
     def poner_clasificador(self, nombre):
@@ -219,17 +266,23 @@ class QoSApp(app_manager.RyuApp):
         cada flujo se vuelve a decidir con el nuevo en su siguiente paquete."""
         self.clasificador = crear(nombre, self.pol)
         self.contadores["cambios_clasificador"] += 1
+        self._recientes.clear()
+        self.inv.recargar()
         borrados = 0
         for dpid, dp in list(self.datapaths.items()):
-            if self.inv.es_acceso(dpid):
+            sw = self.inv.switch(dpid)
+            if sw and sw["tipo"] == "acceso":
                 ofp, parser = dp.ofproto, dp.ofproto_parser
-                dp.send_msg(parser.OFPFlowMod(datapath=dp, command=ofp.OFPFC_DELETE,
-                                              table_id=ofp.OFPTT_ALL, cookie=COOKIE_FLUJO,
-                                              cookie_mask=0xFFFFFFFFFFFFFFFF, out_port=ofp.OFPP_ANY,
-                                              out_group=ofp.OFPG_ANY, match=parser.OFPMatch()))
+                for cookie in (COOKIE_FLUJO, COOKIE_PROACTIVA):
+                    dp.send_msg(parser.OFPFlowMod(datapath=dp, command=ofp.OFPFC_DELETE,
+                                                  table_id=ofp.OFPTT_ALL, cookie=cookie,
+                                                  cookie_mask=0xFFFFFFFFFFFFFFFF, out_port=ofp.OFPP_ANY,
+                                                  out_group=ofp.OFPG_ANY, match=parser.OFPMatch()))
+                dp.send_msg(parser.OFPBarrierRequest(dp))      # borrar antes de instalar las nuevas
+                self._instalar_proactivas(dp, sw)
                 borrados += 1
-        self.logger.info("Clasificador -> '%s' (reglas por flujo borradas en %d switches de acceso)",
-                         nombre, borrados)
+        self.logger.info("Clasificador -> '%s' (reglas borradas y reinstaladas en %d switches de acceso; "
+                         "%d reglas por adelantado)", nombre, borrados, sum(self.proactivas.values()))
         return borrados
 
     def estado(self):
@@ -243,6 +296,8 @@ class QoSApp(app_manager.RyuApp):
             "decision_ms": {"n": len(ms), "p50": percentil(ms, 50), "p95": percentil(ms, 95),
                             "max": max(ms) if ms else None},
             "idle_timeout_s": self.cfg["idle_timeout_s"],
+            "reglas_por_adelantado": {self.inv.switch(d)["nombre"]: n for d, n in self.proactivas.items()
+                                      if d in self.datapaths and self.inv.switch(d)},
         }
 
     # ---------------- telemetría ----------------
@@ -257,6 +312,8 @@ class QoSApp(app_manager.RyuApp):
                         self._pedir_estadisticas(dp)
                 pendientes, self._decisiones = self._decisiones, []
                 self.tel.registrar_decisiones(pendientes)
+                viejas = time.time() - RECIENTE_S
+                self._recientes = {k: v for k, v in self._recientes.items() if v > viejas}
                 vueltas += 1
                 if vueltas % 720 == 0:          # ~ cada hora con 5 s
                     borradas = self.tel.limpiar()

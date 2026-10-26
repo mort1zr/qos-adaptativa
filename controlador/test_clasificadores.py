@@ -4,8 +4,11 @@
 """
 import unittest
 
-from controlador.clasificadores import (CLASIFICADORES, Clasificador, Decision, Flujo, PorPolitica,
-                                        SinClasificar, armar_flujo, crear)
+import datetime
+
+from controlador.clasificadores import (CLASIFICADORES, Clasificador, Decision, Flujo, PorDestino, PorPolitica,
+                                        SinClasificar, TablaDestinos, TablaInvalida, armar_flujo, crear,
+                                        red_para_openflow)
 from politicas.cargador import cargar
 
 EQUIPOS = [
@@ -23,6 +26,9 @@ EQUIPOS = [
     ("sa1pos1", 1, "pagos", "pos", "10.1.30.10", "Pagos"),
     ("sa1nvr", 1, "cctv", "nvr", "10.1.40.10", "Cámaras"),
     ("sa1cli1", 1, "wifi_clientes", "cliente_wifi", "10.1.60.10", "WiFi clientes"),
+    ("sa1cli2", 1, "wifi_clientes", "cliente_wifi", "10.1.60.11", "WiFi clientes"),
+    ("inetsip", None, "internet", "troncal_sip", "203.0.113.11", "Internet"),
+    ("inetweb", None, "internet", "navegacion", "203.0.113.50", "Internet"),
     ("inetvc", None, "internet", "videoconferencia", "203.0.113.10", "Internet"),
     ("inetia", None, "internet", "ia_generativa", "203.0.113.20", "Internet"),
     ("inetstr", None, "internet", "streaming", "203.0.113.30", "Internet"),
@@ -35,7 +41,8 @@ ACC1 = {"nombre": "acc1", "sede_id": 1, "puerto_operador": 1, "puerto_sede": 2}
 
 class InventarioFalso:
     def __init__(self):
-        self.por_nombre = {n: {"nombre": n, "sede_id": s, "segmento": seg, "tipo": t, "ip": ip, "area": a}
+        self.por_nombre = {n: {"nombre": n, "sede_id": s, "segmento": seg, "tipo": t, "ip": ip, "area": a,
+                               "gateway": ip.rsplit(".", 1)[0] + ".1"}
                            for n, s, seg, t, ip, a in EQUIPOS}
         self.por_ip = {e["ip"]: e for e in self.por_nombre.values()}
 
@@ -77,7 +84,8 @@ class Clasificadores(unittest.TestCase):
         self.assertEqual((f.local["nombre"], f.remoto), ("sa1caja", None))
         f = armar_flujo(self.inv, ACC1, "198.51.100.7", "198.51.100.8", 6, 1, ts=1.0)
         self.assertIsNone(f.local)
-        self.assertEqual(self.politica.clasificar(f), Decision("masivo", "equipo fuera del inventario"))
+        self.assertEqual(self.politica.clasificar(f),
+                         Decision("masivo", "equipo fuera del inventario", "desconocido"))
 
     # ---------------- política ----------------
     def test_voz_en_ambos_sentidos_y_en_ambos_switches(self):
@@ -139,6 +147,122 @@ class Clasificadores(unittest.TestCase):
             self.assertEqual(self.pol.cola(c.clasificar(self.flujo("sa1cli1", "inetstr")).clase), 2)
         finally:
             del CLASIFICADORES[Siempre.nombre]
+
+
+
+class Destinos(unittest.TestCase):
+    """Clasificación por tabla de destinos (PCIII-20)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.pol = cargar()
+        cls.inv = InventarioFalso()
+        cls.destino = PorDestino(cls.pol)            # la tabla real: politicas/destinos.yaml
+        cls.politica = PorPolitica(cls.pol)
+
+    flujo = Clasificadores.flujo
+
+    def decidir(self, origen, destino, sw=ACC1):
+        return self.destino.clasificar(self.flujo(origen, destino, sw))
+
+    def test_la_tabla_real_es_valida_y_encuentra_por_red(self):
+        t = self.destino.tabla
+        self.assertEqual(t.buscar("203.0.113.10").proveedor, "Microsoft Teams")
+        self.assertEqual(t.buscar("203.0.113.14").proveedor, "Zoom")          # dentro de 203.0.113.12/30
+        self.assertEqual(t.buscar("203.0.113.23").proveedor, "Microsoft Copilot")
+        self.assertIsNone(t.buscar("203.0.113.50"))                             # navegación: no está
+        self.assertIsNone(t.buscar("no-es-ip"))
+
+    def test_tabla_invalida(self):
+        datos = {"destinos": [
+            {"proveedor": "A", "servicio": "videoconferencia", "redes": ["203.0.113.8/29"]},
+            {"proveedor": "B", "servicio": "voip", "redes": ["203.0.113.12/30"]},          # se pisa con A
+            {"proveedor": "C", "servicio": "tiktok", "redes": ["203.0.113.300/32"]},       # servicio y red malos
+            {"proveedor": "D", "servicio": "pagos"}]}                                      # sin redes
+        with self.assertRaises(TablaInvalida) as ctx:
+            TablaDestinos(datos, servicios_validos=set(self.pol.defecto))
+        texto = str(ctx.exception)
+        for parte in ("se pisan", "tiktok", "203.0.113.300", "D: necesita"):
+            self.assertIn(parte, texto)
+
+    def test_servicios_de_internet_por_la_tabla(self):
+        casos = {("sa1caja", "inetvc"): ("tiempo_real", "videoconferencia", "Microsoft Teams"),
+                 ("sa1pos1", "inetpago1"): ("critico", "pagos", "Procesadora de pagos A"),
+                 ("sa1musica", "inetstr"): ("negocio", "streaming", "YouTube"),
+                 ("sa1cli1", "inetstr"): ("restringido", "streaming", "YouTube"),
+                 ("inetupd", "sa1caja"): ("masivo", "descargas", "Actualizaciones de software (CDN)")}
+        for (o, d), (clase, servicio, proveedor) in casos.items():
+            dec = self.decidir(o, d)
+            self.assertEqual((dec.clase, dec.servicio), (clase, servicio), (o, d))
+            self.assertIn(proveedor, dec.motivo)
+
+    def test_fuera_de_la_tabla_queda_desconocido(self):
+        dec = self.decidir("sa1caja", "inetweb")
+        self.assertEqual((dec.clase, dec.servicio), ("masivo", "desconocido"))
+        self.assertIn("destino fuera de la tabla", dec.motivo)
+        # una IP de Internet que ni siquiera está en el inventario
+        f = armar_flujo(self.inv, ACC1, "10.1.20.10", "198.51.100.7", 6, 2, ts=1.0)
+        self.assertEqual(self.destino.clasificar(f).servicio, "desconocido")
+        # el WiFi de clientes sigue restringido aunque el destino sea desconocido
+        self.assertEqual(self.decidir("sa1cli1", "inetweb").clase, "restringido")
+
+    def test_matriz_area_por_aplicacion(self):
+        self.assertEqual(self.decidir("ofsis1", "inetia", ACC0).clase, "negocio")       # Sistemas
+        self.assertEqual(self.decidir("ofcon1", "inetia", ACC0).clase, "masivo")        # Contabilidad
+        self.assertIn("OpenAI", self.decidir("ofsis1", "inetia", ACC0).motivo)
+
+    def test_servidores_propios_por_inventario(self):
+        dec = self.decidir("sa1tel", "ofpbx")
+        self.assertEqual((dec.clase, dec.servicio), ("tiempo_real", "voip"))
+        self.assertIn("servidor propio ofpbx", dec.motivo)
+        self.assertEqual(self.decidir("ofpbx", "inetsip", ACC0).clase, "tiempo_real")   # troncal SIP
+        self.assertEqual(self.decidir("sa1nvr", "ofmon", ACC1).clase, "vigilancia")     # NVR: lo sirve el local
+        self.assertEqual(self.decidir("sa1nvr", "ofmon", ACC0).clase, "vigilancia")
+
+    def test_reunion_de_emergencia_no_depende_de_la_hora(self):
+        base = self.flujo("sa1caja", "inetvc")
+        for hora in (3, 10, 23):
+            ts = datetime.datetime(2026, 11, 4, hora, 0).timestamp()
+            f = Flujo(base.sede_id, base.sentido, base.origen_ip, base.destino_ip, base.proto,
+                      base.local, base.remoto, ts)
+            self.assertEqual(self.destino.clasificar(f).clase, "tiempo_real", hora)
+
+    def test_coincide_con_la_politica_donde_el_destino_se_conoce(self):
+        for o, d, sw in (("sa1caja", "inetvc", ACC1), ("sa1srv", "ofcms", ACC1), ("sa1srv", "ofbak", ACC1),
+                         ("sa1pos1", "inetpago1", ACC1), ("sa1sort", "ofcms", ACC1),
+                         ("sa1musica", "inetstr", ACC1), ("sa1cli1", "inetstr", ACC1),
+                         ("ofsis1", "inetia", ACC0), ("ofcon1", "inetia", ACC0), ("ofpbx", "inetsip", ACC0)):
+            f = self.flujo(o, d, sw)
+            self.assertEqual(self.destino.clasificar(f).clase, self.politica.clasificar(f).clase, (o, d))
+
+    def test_reglas_por_adelantado(self):
+        equipos = list(self.inv.por_nombre.values())
+        reglas = self.destino.reglas_proactivas(equipos, 1)
+        por = {(r.local, r.remota): r for r in reglas}
+        # WiFi de clientes: una regla por red, restringida, para cualquier destino conocido
+        self.assertEqual(por[("10.1.60.0/24", "203.0.113.10/32")].clase, "restringido")
+        # administración: la PC de música y la caja difieren en YouTube -> una regla por equipo
+        self.assertEqual(por[("10.1.20.11/32", "203.0.113.28/30")].clase, "negocio")
+        self.assertEqual(por[("10.1.20.10/32", "203.0.113.28/30")].clase, "restringido")
+        self.assertNotIn(("10.1.20.0/24", "203.0.113.28/30"), por)
+        # ... pero con Teams todos dan lo mismo -> una sola regla para la red
+        self.assertEqual(por[("10.1.20.0/24", "203.0.113.10/32")].clase, "tiempo_real")
+        # servidores propios de otra sede: la central telefónica
+        self.assertEqual(por[("10.1.20.0/24", "10.0.10.14/32")].clase, "tiempo_real")
+        # nunca reglas hacia equipos de la misma sede ni para la navegación (no está en la tabla)
+        self.assertFalse(any(r.remota.startswith("10.1.") or r.remota == "203.0.113.50/32" for r in reglas))
+        # cada regla coincide con lo que decidiría el clasificador con el primer paquete
+        self.assertEqual(self.decidir("sa1musica", "inetstr").clase, por[("10.1.20.11/32", "203.0.113.28/30")].clase)
+
+    def test_red_para_openflow(self):
+        self.assertEqual(red_para_openflow("10.1.20.0/24"), ("10.1.20.0", "255.255.255.0"))
+        self.assertEqual(red_para_openflow("203.0.113.12/30"), ("203.0.113.12", "255.255.255.252"))
+        self.assertEqual(red_para_openflow("203.0.113.10/32"), "203.0.113.10")
+
+    def test_los_otros_clasificadores_no_instalan_nada_por_adelantado(self):
+        equipos = list(self.inv.por_nombre.values())
+        self.assertEqual(self.politica.reglas_proactivas(equipos, 1), [])
+        self.assertEqual(SinClasificar(self.pol).reglas_proactivas(equipos, 1), [])
 
 
 if __name__ == "__main__":

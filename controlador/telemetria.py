@@ -61,11 +61,13 @@ CREATE INDEX IF NOT EXISTS sondeos_ts ON sondeos(ts);
 CREATE TABLE IF NOT EXISTS decisiones (
     ts REAL, dpid INTEGER, sede_id INTEGER, sentido TEXT, origen_ip TEXT, destino_ip TEXT,
     proto INTEGER, origen TEXT, destino TEXT, area TEXT, clasificador TEXT, clase TEXT,
-    cola INTEGER, motivo TEXT, ms REAL);
+    cola INTEGER, motivo TEXT, ms REAL, servicio TEXT, via TEXT);
 CREATE INDEX IF NOT EXISTS decisiones_ts ON decisiones(ts);
 """
 CAMPOS_DECISION = ("ts", "dpid", "sede_id", "sentido", "origen_ip", "destino_ip", "proto", "origen",
-                   "destino", "area", "clasificador", "clase", "cola", "motivo", "ms")
+                   "destino", "area", "clasificador", "clase", "cola", "motivo", "ms", "servicio", "via")
+# Columnas agregadas después de crear la tabla (PCIII-20): se suman a las bases existentes.
+COLUMNAS_NUEVAS = {"decisiones": ("servicio", "via")}
 
 PROTOCOLOS = {1: "icmp", 6: "tcp", 17: "udp"}
 NO_DISPONIBLE = 2 ** 64 - 1     # OpenFlow informa así un contador que el switch no tiene
@@ -86,11 +88,20 @@ class Telemetria:
         os.makedirs(os.path.dirname(ruta_db) or ".", exist_ok=True)
         self.db = sqlite3.connect(ruta_db, check_same_thread=False)
         self.db.executescript(ESQUEMA)
+        self._migrar()
         self._flujos: Dict[tuple, Tuple[int, int, float]] = {}   # clave -> (bytes, paquetes, ts)
         self._puertos: Dict[tuple, Tuple[int, int, float]] = {}
         self._descartes: Dict[tuple, int] = {}                     # puerto -> tx_dropped anterior
         self._sondeos: Dict[int, float] = {}                       # sede -> ts del sondeo anterior
         self._politica = PorPolitica(politicas)
+
+    def _migrar(self):
+        for tabla, columnas in COLUMNAS_NUEVAS.items():
+            existentes = {fila[1] for fila in self.db.execute(f"PRAGMA table_info({tabla})")}
+            for c in columnas:
+                if c not in existentes:
+                    self.db.execute(f"ALTER TABLE {tabla} ADD COLUMN {c} TEXT")
+        self.db.commit()
 
     # ---------------- quién es quién ----------------
     def describir(self, sw: dict, origen_ip: str, destino_ip: str, in_port: int) -> dict:
@@ -309,17 +320,20 @@ def resumen_decisiones(db_path: str = DB_DEFECTO, minutos: float = 10, ahora: Op
         args.append(sede_id)
     con = sqlite3.connect(db_path)
     try:
-        filas = con.execute(f"SELECT clasificador, clase, cola, ms FROM decisiones WHERE {filtro}",
-                            args).fetchall()
+        filas = con.execute(f"SELECT clasificador, clase, cola, ms, COALESCE(via, 'reactiva') "
+                            f"FROM decisiones WHERE {filtro}", args).fetchall()
     except sqlite3.OperationalError:        # base del Sprint 2, sin la tabla todavía
         filas = []
     con.close()
     grupos: Dict[tuple, List[float]] = {}
-    for clasificador, clase, cola, ms in filas:
+    vias: Dict[tuple, Dict[str, int]] = {}
+    for clasificador, clase, cola, ms, via in filas:
         grupos.setdefault((clasificador, clase, cola), []).append(ms)
+        v = vias.setdefault((clasificador, clase, cola), {})
+        v[via] = v.get(via, 0) + 1
     return [{"clasificador": c, "clase": k, "cola": q, "decisiones": len(ms),
              "p50_ms": round(percentil(ms, 50), 2), "p95_ms": round(percentil(ms, 95), 2),
-             "max_ms": round(max(ms), 2)}
+             "max_ms": round(max(ms), 2), "proactivas": vias[(c, k, q)].get("proactiva", 0)}
             for (c, k, q), ms in sorted(grupos.items(), key=lambda x: (x[0][0], x[0][2]))]
 
 

@@ -1,0 +1,17 @@
+fecha,sala,prueba,origen,destino,esperado,decidido,servicio,politica,via,motivo,valor,criterio,cumple
+2026-10-25T19:59:02,1,reconocimiento,sa1caja,inetvc,tiempo_real,tiempo_real,videoconferencia,tiempo_real,proactiva,Microsoft Teams · Llamadas y videollamadas desde cualquier equipo,,"clase tiempo_real, servicio videoconferencia, igual a la política",sí
+2026-10-25T19:59:02,1,reconocimiento,ofpbx,inetsip,tiempo_real,tiempo_real,troncal_sip,tiempo_real,proactiva,Operador de telefonía SIP · Llamadas y videollamadas desde cualquier equipo,,"clase tiempo_real, servicio troncal_sip, igual a la política",sí
+2026-10-25T19:59:02,1,reconocimiento,ofsis1,inetia,negocio,negocio,ia_generativa,negocio,proactiva,OpenAI (ChatGPT) · IA generativa del área de Sistemas,,"clase negocio, servicio ia_generativa, igual a la política",sí
+2026-10-25T19:59:02,1,reconocimiento,ofcon1,inetia,masivo,masivo,ia_generativa,masivo,proactiva,OpenAI (ChatGPT) · servicio 'ia_generativa' por defecto,,"clase masivo, servicio ia_generativa, igual a la política",sí
+2026-10-25T19:59:02,1,reconocimiento,sa1musica,inetstr,negocio,negocio,streaming,negocio,proactiva,YouTube · Música de la sala (tráfico del negocio aunque sea YouTube),,"clase negocio, servicio streaming, igual a la política",sí
+2026-10-25T19:59:02,1,reconocimiento,sa1cli1,inetstr,restringido,restringido,streaming,restringido,proactiva,YouTube · WiFi de clientes siempre restringido,,"clase restringido, servicio streaming, igual a la política",sí
+2026-10-25T19:59:02,1,reconocimiento,sa1pos1,inetpago1,critico,critico,pagos,critico,proactiva,Procesadora de pagos A · Pagos con tarjeta,,"clase critico, servicio pagos, igual a la política",sí
+2026-10-25T19:59:02,1,reconocimiento,sa1caja,inetupd,masivo,masivo,descargas,masivo,proactiva,Actualizaciones de software (CDN) · servicio 'descargas' por defecto,,"clase masivo, servicio descargas, igual a la política",sí
+2026-10-25T19:59:02,1,reconocimiento,sa1tel,ofpbx,tiempo_real,tiempo_real,voip,tiempo_real,proactiva,servidor propio ofpbx · Llamadas y videollamadas desde cualquier equipo,,"clase tiempo_real, servicio voip, igual a la política",sí
+2026-10-25T19:59:02,1,reconocimiento,sa1srv,ofcms,critico,critico,gestion,critico,proactiva,servidor propio ofcms · Operación de máquinas (reporte en tiempo real a la central),,"clase critico, servicio gestion, igual a la política",sí
+2026-10-25T19:59:02,1,reconocimiento,sa1caja,inetweb,masivo,masivo,desconocido,masivo,reactiva,destino fuera de la tabla · servicio 'desconocido' por defecto,,"clase masivo, servicio desconocido, igual a la política",sí
+2026-10-25T19:59:02,1,reconocimiento,sa1cli1,inetweb,restringido,restringido,desconocido,restringido,reactiva,destino fuera de la tabla · WiFi de clientes siempre restringido,,"clase restringido, servicio desconocido, igual a la política",sí
+2026-10-25T19:59:02,1,por_adelantado,,en la tabla (Teams),,,,,,,-0.22,primer paquete sin espera extra (< 3 ms) y menor que el reactivo,sí
+2026-10-25T19:59:02,1,por_adelantado,,fuera de la tabla (web),,,,,,,4.28,primer paquete sin espera extra (< 3 ms) y menor que el reactivo,-
+2026-10-25T19:59:02,1,telemetria,,Teams,,,,,,,"2 reglas por flujo, 12 decisiones por adelantado",2 reglas por flujo (ida y vuelta) y decisiones 'proactiva',sí
+2026-10-25T19:59:02,1,reglas_por_adelantado,,,,,,,,,"{'acc0': 256, 'acc1': 346, 'acc2': 346, 'acc3': 346, 'acc4': 346}",-,-

@@ -17,7 +17,8 @@ Estrategias:
   sin_qos     una cola, FIFO larga: red sin gestionar
   fila_corta  6 colas, todo en "masivo", fila corta: la estrategia de control
   prioridad   6 colas y el controlador manda cada flujo a la cola de su clase
-              según politicas.yaml (set_queue, PCIII-19); las tasas no cambian
+              (set_queue, PCIII-19) reconociéndolo por la tabla de destinos
+              (clasificador 'destino', PCIII-20); las tasas no cambian
 'estatica' (reglas por horario) llega en PCIII-21 e 'ia' en los Sprints 4-5.
 La estrategia también fija el clasificador de Ryu, por su API REST.
 
@@ -54,7 +55,7 @@ ESCENARIOS = os.path.join(AQUI, "escenarios.yaml")
 CSV = os.path.join(RAIZ, "experimentos", "resultados", "escenarios.csv")
 CONTEXTO = os.path.join(RAIZ, "datos", "contexto.csv")
 ESTRATEGIAS = {"sin_qos": "sin_qos", "fila_corta": "colas", "prioridad": "colas"}  # -> colas de la topología
-CLASIFICADOR = {"sin_qos": "ninguno", "fila_corta": "ninguno", "prioridad": "politica"}  # -> clasificador de Ryu
+CLASIFICADOR = {"sin_qos": "ninguno", "fila_corta": "ninguno", "prioridad": "destino"}  # -> clasificador de Ryu
 FUTURAS = {"estatica": "PCIII-21 (Sprint 3)", "ia": "los Sprints 4 y 5"}
 PUERTO_VOZ = 5001
 

@@ -1,0 +1,48 @@
+# Tabla de destinos conocidos de Internet (historia PCIII-20).
+#
+# Simula las listas que publican los proveedores para que las empresas
+# prioricen su tráfico sin ver el contenido (cifrado): por ejemplo, los rangos
+# de Microsoft 365, de Zoom o de Google. En una red real la tabla se actualiza
+# desde esas listas o desde las consultas DNS (los dominios); aquí la
+# simulación no tiene DNS, así que el clasificador usa solo las redes y los
+# dominios quedan como referencia.
+#
+# Las direcciones son del rango 203.0.113.0/24, reservado para documentación
+# (RFC 5737): no son las reales de ningún proveedor. Algunos rangos no tienen
+# servidor en la simulación (Zoom, Meet, Anthropic...): están para mostrar que
+# la tabla cubre a varios proveedores por servicio.
+#
+# Lo que NO está aquí no se adivina: el clasificador responde "desconocido"
+# (la clase de "desconocido" en politicas.yaml) y en el Sprint 4 lo resolverá
+# el modelo de aprendizaje automático. La navegación web general, por ejemplo,
+# no está en la tabla a propósito.
+#
+# Los servidores de la propia empresa (central, ERP, central telefónica, NVR)
+# no van aquí: la empresa ya los conoce por su inventario.
+#
+# 'servicio' debe existir en servicios_por_defecto de politicas.yaml; la clase
+# final la decide politicas.yaml con la matriz área x aplicación.
+
+destinos:
+  - {proveedor: "Microsoft Teams", servicio: videoconferencia, redes: [203.0.113.10/32],
+     dominios: ["*.teams.microsoft.com", "*.skype.com"]}
+  - {proveedor: "Zoom", servicio: videoconferencia, redes: [203.0.113.12/30],
+     dominios: ["*.zoom.us"]}
+  - {proveedor: "Google Meet", servicio: videoconferencia, redes: [203.0.113.16/30],
+     dominios: ["meet.google.com"]}
+  - {proveedor: "Operador de telefonía SIP", servicio: troncal_sip, redes: [203.0.113.11/32],
+     dominios: ["sip.operador.example"]}
+  - {proveedor: "OpenAI (ChatGPT)", servicio: ia_generativa, redes: [203.0.113.20/32],
+     dominios: ["chatgpt.com", "api.openai.com"]}
+  - {proveedor: "Anthropic (Claude)", servicio: ia_generativa, redes: [203.0.113.21/32],
+     dominios: ["claude.ai", "api.anthropic.com"]}
+  - {proveedor: "Microsoft Copilot", servicio: ia_generativa, redes: [203.0.113.22/31],
+     dominios: ["copilot.microsoft.com"]}
+  - {proveedor: "YouTube", servicio: streaming, redes: [203.0.113.28/30],
+     dominios: ["*.youtube.com", "*.googlevideo.com"]}
+  - {proveedor: "Actualizaciones de software (CDN)", servicio: descargas, redes: [203.0.113.40/29],
+     dominios: ["*.windowsupdate.com", "*.delivery.mp.microsoft.com"]}
+  - {proveedor: "Procesadora de pagos A", servicio: pagos, redes: [203.0.113.60/32],
+     dominios: ["pagos-a.example"]}
+  - {proveedor: "Procesadora de pagos B", servicio: pagos, redes: [203.0.113.61/32],
+     dominios: ["pagos-b.example"]}

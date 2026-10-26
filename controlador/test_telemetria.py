@@ -175,6 +175,23 @@ class Telemetria_(unittest.TestCase):
         # las decisiones identifican equipos: se borran con la retención
         self.assertEqual(self.tel.limpiar(ts=25 * 3600), 5)
 
+    def test_base_del_sprint_anterior_se_actualiza(self):
+        ruta = os.path.join(self.dir, "vieja.db")
+        con = sqlite3.connect(ruta)
+        con.execute("CREATE TABLE decisiones (ts REAL, dpid INTEGER, sede_id INTEGER, sentido TEXT, "
+                    "origen_ip TEXT, destino_ip TEXT, proto INTEGER, origen TEXT, destino TEXT, area TEXT, "
+                    "clasificador TEXT, clase TEXT, cola INTEGER, motivo TEXT, ms REAL)")
+        con.execute("INSERT INTO decisiones VALUES (1,15,1,'subida','a','b',17,'a','b','x','politica',"
+                    "'masivo',0,'m',0.5)")
+        con.commit()
+        con.close()
+        tel = Telemetria(self.tel.inv, cargar(), ruta, intervalo_s=5)
+        tel.registrar_decisiones([{"ts": 2, "clasificador": "destino", "clase": "critico", "cola": 2,
+                                   "ms": 0.3, "servicio": "pagos", "via": "proactiva"}])
+        tel.db.close()
+        r = {f["clasificador"]: f for f in resumen_decisiones(ruta, 1, ahora=10)}
+        self.assertEqual((r["politica"]["decisiones"], r["destino"]["proactivas"]), (1, 1))
+
     def test_percentil(self):
         self.assertIsNone(percentil([], 95))
         self.assertEqual(percentil([5, 1, 3], 50), 3)

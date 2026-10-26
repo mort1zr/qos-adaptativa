@@ -115,7 +115,7 @@ class Estrategias(unittest.TestCase):
     def test_cada_estrategia_pide_su_clasificador(self):
         esperado = {"sin_qos": ("una_cola", "fifo", "ninguno"),
                     "fila_corta": ("colas", "pfifo:64", "ninguno"),
-                    "prioridad": ("colas", "pfifo:64", "politica")}
+                    "prioridad": ("colas", "pfifo:64", "destino")}
         self.assertEqual(set(esperado), set(ESTRATEGIAS))
         for estrategia, (colas, hoja, clasificador) in esperado.items():
             emp, cliente = self.Emp(), self.Api()
