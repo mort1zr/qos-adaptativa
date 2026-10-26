@@ -121,3 +121,104 @@ escenarios:
       - nombre: valle
         duracion_s: 90
         sala: {camara_remota: 0.5, respaldo: 1, descargas: 1}
+
+  # ---------------------------------------------------------------------------
+  # Situaciones que NO siguen el horario (punto 3) y enlace degradado (punto 2).
+  # Definidas antes de entrenar la IA: no se ajustan a ella después.
+  # ---------------------------------------------------------------------------
+
+  incidente_camaras:
+    descripcion: >-
+      Martes 11:00. Un incidente en la sala: desde la oficina miran en vivo 6
+      cámaras a la vez (unos 9 Mbps de subida que no se adaptan).
+    inicio: {dia: martes, hora: "11:00"}
+    fases:
+      - nombre: normal
+        duracion_s: 30
+        sala: {maquinas_reporte: 1, pagos_pos: 1, musica_sala: 1, camara_remota: 1,
+               wifi_clientes: 0.5}
+        oficina: {navegacion: 1, ia_generativa: 1}
+      - nombre: incidente
+        duracion_s: 60
+        sala: {maquinas_reporte: 1, pagos_pos: 1, musica_sala: 1, camara_remota: 3,
+               wifi_clientes: 0.5}
+        oficina: {navegacion: 1, ia_generativa: 1}
+      - nombre: normal_otra_vez
+        duracion_s: 30
+        sala: {maquinas_reporte: 1, pagos_pos: 1, musica_sala: 1, camara_remota: 1,
+               wifi_clientes: 0.5}
+        oficina: {navegacion: 1, ia_generativa: 1}
+
+  sorteo_extraordinario:
+    descripcion: >-
+      Martes 16:00. Un sorteo especial anunciado ese mismo día, fuera del
+      sábado de siempre: la misma carga que el sorteo, en un horario que el
+      calendario no espera.
+    inicio: {dia: martes, hora: "16:00"}
+    fases:
+      - nombre: previa
+        duracion_s: 30
+        sala: {maquinas_reporte: 1.5, sorteo_pc: 1, pagos_pos: 1.5, musica_sala: 1,
+               camara_remota: 1, wifi_clientes: 1}
+      - nombre: sorteo
+        duracion_s: 60
+        sala: {maquinas_reporte: 2, sorteo_pc: 8, pagos_pos: 4, musica_sala: 1,
+               camara_remota: 2, wifi_clientes: 1.5}
+      - nombre: posterior
+        duracion_s: 30
+        sala: {maquinas_reporte: 1.5, sorteo_pc: 1, pagos_pos: 2, musica_sala: 1,
+               camara_remota: 1, wifi_clientes: 1}
+
+  respaldo_atrasado:
+    descripcion: >-
+      Lunes 07:44. El respaldo de la noche se atrasó y sigue corriendo cuando la
+      sala abre a las 08:00 (en la mitad de la fase de arranque).
+    inicio: {dia: lunes, hora: "07:44"}
+    fases:
+      - nombre: fin_de_noche
+        duracion_s: 30
+        sala: {maquinas_reporte: 0.2, camara_remota: 0.5, respaldo: 1}
+      - nombre: arranque
+        duracion_s: 60
+        sala: {maquinas_reporte: 3, sorteo_pc: 1, pagos_pos: 0.5, musica_sala: 1,
+               camara_remota: 1, descargas: 1, respaldo: 1}
+        oficina: {navegacion: 0.5}
+      - nombre: estable
+        duracion_s: 30
+        sala: {maquinas_reporte: 1, pagos_pos: 1, musica_sala: 1, camara_remota: 1,
+               wifi_clientes: 0.3, respaldo: 1}
+        oficina: {navegacion: 1, ia_generativa: 1}
+
+  evento_especial:
+    descripcion: >-
+      Martes 21:00. La sala se llena por un evento (un torneo) en un día que
+      normalmente es tranquilo: la carga de un sábado por la noche, un martes.
+    inicio: {dia: martes, hora: "21:00"}
+    fases:
+      - nombre: lleno
+        duracion_s: 90
+        sala: {maquinas_reporte: 1.5, sorteo_pc: 1, pagos_pos: 3, musica_sala: 1,
+               camara_remota: 2, wifi_clientes: 4}
+
+  enlace_degradado:
+    descripcion: >-
+      Sábado 21:30, sala concurrida. Se cae el enlace principal y la sala pasa
+      al enlace de respaldo (4G) del operador: durante la fase 'degradado'
+      entrega el 30 % de lo contratado y pierde 0.5 % de los paquetes. La
+      demanda supera lo que llega, y nuestras colas no lo saben: la fila se
+      forma en el operador.
+    inicio: {dia: sabado, hora: "21:30"}
+    fases:
+      - nombre: normal
+        duracion_s: 30
+        sala: {maquinas_reporte: 1.5, sorteo_pc: 1, pagos_pos: 2, musica_sala: 1,
+               camara_remota: 1, wifi_clientes: 2}
+      - nombre: degradado
+        duracion_s: 60
+        enlace: {capacidad_pct: 30, perdida_pct: 0.5}
+        sala: {maquinas_reporte: 1.5, sorteo_pc: 1, pagos_pos: 2, musica_sala: 1,
+               camara_remota: 1, wifi_clientes: 2}
+      - nombre: recuperado
+        duracion_s: 30
+        sala: {maquinas_reporte: 1.5, sorteo_pc: 1, pagos_pos: 2, musica_sala: 1,
+               camara_remota: 1, wifi_clientes: 2}

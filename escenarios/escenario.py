@@ -11,8 +11,9 @@ Escenarios reproducibles de la empresa (historia PCIII-18).
 Levanta la red una sola vez y, para cada estrategia y cada escenario, recorre
 sus fases: genera el tráfico de los perfiles (trafico/), mide con sondas la
 voz, la videollamada, los pagos y la carga de páginas web, lee el uso del
-enlace de la sala y, de la telemetría, cuánto obtuvo cada clase y a qué ritmo
-avanzaron el respaldo y las descargas (lo que pierde lo "masivo" al priorizar). El reloj simulado se
+enlace de la sala, mide el goodput del respaldo y de las descargas (lo que les
+llega de verdad: lo que pierde lo "masivo" al priorizar) y, de la telemetría,
+lo que cada clase ofreció al enlace. El reloj simulado se
 publica en datos/reloj.json y cada fase queda registrada en datos/contexto.csv
 (para unir la telemetría con el escenario, la hora y la estrategia).
 
@@ -52,6 +53,8 @@ for ruta in (os.path.join(RAIZ, "topologia"), os.path.join(RAIZ, "experimentos")
 
 import yaml  # noqa: E402
 
+from escenarios.operador import Operador, condiciones  # noqa: E402
+from escenarios.operador import validar as validar_enlace  # noqa: E402
 from escenarios.reloj import DIAS, RelojSimulado, normalizar_dia  # noqa: E402
 from controlador import api  # noqa: E402
 from trafico.generador import APLICACIONES, Generador, cargar_perfiles  # noqa: E402
@@ -97,6 +100,8 @@ def cargar_escenarios(ruta: str = ESCENARIOS, perfiles: dict = None) -> dict:
             errores.append(f"{nombre}: necesita al menos una fase")
         for k in set(e.get("sondas") or {}) - SONDAS:
             errores.append(f"{nombre}: sonda desconocida '{k}'")
+        for fase in e.get("fases") or []:
+            errores += [f"{nombre}/{fase.get('nombre')}: {x}" for x in validar_enlace(fase.get("enlace"))]
         for i, fase in enumerate(e.get("fases") or [], 1):
             etiqueta = f"{nombre}/{fase.get('nombre', i)}"
             if not (isinstance(fase.get("duracion_s"), (int, float)) and fase["duracion_s"] >= 10):
@@ -129,6 +134,8 @@ def plan_escenario(datos: dict, nombre: str, semilla: int = 7, ruido: float = 0.
     fases = []
     for fase in datos["escenarios"][nombre]["fases"]:
         f = {"nombre": fase["nombre"], "duracion_s": max(10, round(fase["duracion_s"] * escala))}
+        if fase.get("enlace"):
+            f["enlace"] = dict(fase["enlace"])
         for lugar in ("sala", "oficina"):
             f[lugar] = {p: round(max(0.0, v * (1 + rng.uniform(-ruido, ruido))), 3) if ruido else v
                         for p, v in sorted((fase.get(lugar) or {}).items())}
@@ -200,30 +207,34 @@ def leer_json(ruta, vacio):
 
 
 def metricas_telemetria(db: str, sede: int, desde: float, hasta: float, segundos: float) -> dict:
-    """Lo que obtuvo cada clase en la sala (Mbps, los dos sentidos) y el ritmo del
-    respaldo y de las descargas, según la telemetría del controlador. La clase es
-    la etiqueta de la política, la misma en todas las estrategias, para comparar."""
+    """Lo que cada clase OFRECIÓ al enlace de la sala (Mbps, los dos sentidos), según la
+    telemetría del controlador. Se cuenta al entrar al switch, antes de las colas:
+    incluye lo que después se descarta y se retransmite (lo que LLEGA se mide aparte,
+    con el goodput de las aplicaciones). La clase es la etiqueta de la política, la
+    misma en todas las estrategias, para comparar."""
     import sqlite3
     try:
         con = sqlite3.connect(db)
         por_clase = dict(con.execute("SELECT clase, SUM(bytes) FROM flujos WHERE sede_id = ? AND ts > ? "
                                      "AND ts <= ? GROUP BY clase", (sede, desde, hasta)).fetchall())
-        por_servicio = dict(con.execute("SELECT servicio, SUM(bytes) FROM flujos WHERE sede_id = ? AND ts > ? "
-                                        "AND ts <= ? AND servicio IN ('respaldo', 'descargas') GROUP BY servicio",
-                                        (sede, desde, hasta)).fetchall())
         con.close()
     except sqlite3.Error:
         return {}
-    mbps = lambda b: round((b or 0) * 8 / segundos / 1e6, 2)  # noqa: E731
-    fila = {f"mbps_{c}": mbps(por_clase.get(c)) for c in CLASES_TELEMETRIA}
-    fila["respaldo_mbps"] = mbps(por_servicio.get("respaldo"))
-    fila["descargas_mbps"] = mbps(por_servicio.get("descargas"))
+    return {f"ofrecido_{c}_mbps": round((por_clase.get(c) or 0) * 8 / segundos / 1e6, 2)
+            for c in CLASES_TELEMETRIA}
+
+
+def goodput_masivo(g: dict) -> dict:
+    """Columnas del goodput del respaldo y de las descargas (None si no hubo en la fase)."""
+    fila = {"respaldo_goodput_mbps": g.get("respaldo"), "descargas_goodput_mbps": g.get("descargas")}
+    r = fila["respaldo_goodput_mbps"]
     # A este ritmo, ¿cuánto tardaría 1 GB de respaldo? (8000 megabits)
-    fila["respaldo_min_1gb"] = round(8000 / fila["respaldo_mbps"] / 60, 1) if fila["respaldo_mbps"] >= 0.1 else None
+    fila["respaldo_1gb_min"] = round(8000 / r / 60, 1) if r and r >= 0.1 else None
     return fila
 
 
-def correr_fase(emp, gen, sala, fase, sondas, m, reloj, nombre, estrategia, telemetria=None, objetivos=None):
+def correr_fase(emp, gen, sala, fase, sondas, m, reloj, nombre, estrategia, telemetria=None, objetivos=None,
+                operador=None):
     """Corre una fase: tráfico de los perfiles + sondas. Devuelve (fila, t0, t1).
     telemetria = (ruta de la base, intervalo_s): espera el último sondeo y agrega
     lo que obtuvo cada clase."""
@@ -231,9 +242,14 @@ def correr_fase(emp, gen, sala, fase, sondas, m, reloj, nombre, estrategia, tele
     net, s, dur = emp.net, f"sa{sala}", fase["duracion_s"]
     cuellos = {sentido: p for sw, p, _, sentido in emp.puertos_acceso if sw == f"acc{sala}"}
     capacidad = next(mb for sw, _, mb, _ in emp.puertos_acceso if sw == f"acc{sala}")
+    enlace = condiciones(fase.get("enlace"))
+    if operador:
+        operador.aplicar(sala, fase.get("enlace"))     # antes del tráfico: la fase entera con esas condiciones
     t0 = time.time()
     reloj.guardar(nombre, fase["nombre"], estrategia=estrategia, sala=sala)
     hora = reloj.describir(t0)
+    gen.medir = {"respaldo", "descargas"}
+    gen.goodput()                                      # descarta lo pendiente de otra fase
     for perfil, i in fase["sala"].items():
         gen.iniciar(perfil, sala, dur, i)
     for perfil, i in fase["oficina"].items():
@@ -289,10 +305,13 @@ def correr_fase(emp, gen, sala, fase, sondas, m, reloj, nombre, estrategia, tele
     gen.esperar(limite=15)
     gen.procesos = [x for x in gen.procesos if "servidor" in x[0]]
     t1 = time.time()
+    goodput = gen.goodput()
 
     uso = {k: 100 * (b1[k] - b0[k]) * 8 / (tb1 - tb0) / 1e6 / capacidad for k in cuellos}
     fila = {"fase": fase["nombre"], "hora_simulada": hora, "duracion_s": dur,
-            "uso_bajada_pct": round(uso["bajada"], 1), "uso_subida_pct": round(uso["subida"], 1)}
+            "uso_bajada_pct": round(uso["bajada"], 1), "uso_subida_pct": round(uso["subida"], 1),
+            "enlace_capacidad_pct": enlace["capacidad_pct"], "enlace_perdida_pct": enlace["perdida_pct"],
+            "enlace_retardo_ms": enlace["retardo_ms"]}
     if "voz" in udp:
         fila.update(evaluar_udp(m, udp["voz"][0], "voz", con_mos=True))
     if "video" in udp:
@@ -308,6 +327,7 @@ def correr_fase(emp, gen, sala, fase, sondas, m, reloj, nombre, estrategia, tele
         objetivo = objetivos.get("web_p95_ms", 3000)
         ok = fila["web_n"] > 0 and fila["web_errores"] == 0 and (fila["web_p95_ms"] or 1e9) <= objetivo
         fila["cumple_web"] = "sí" if ok else "no"
+    fila.update(goodput_masivo(goodput))
     if telemetria:
         db, intervalo = telemetria
         # Un sondeo más: los últimos bytes de cada flujo llegan con él. De paso, las
@@ -343,6 +363,11 @@ def guardar_csv(ruta, filas):
         w.writerows(previas + filas)
 
 
+def enlace_degradado(fila: dict) -> bool:
+    return (float(fila.get("enlace_capacidad_pct") or 100) < 100 or float(fila.get("enlace_perdida_pct") or 0) > 0
+            or float(fila.get("enlace_retardo_ms") or 0) > 0)
+
+
 def imprimir(filas):
     fmt = lambda v, d=1: "-" if v in (None, "") else f"{v:.{d}f}"  # noqa: E731
     actual = None
@@ -353,30 +378,36 @@ def imprimir(filas):
             print(f"    {'Fase':16s} {'Hora sim.':14s} {'Uso baj/sub':>12s} {'Voz p95 sub/baj':>16s} "
                   f"{'Jitter':>7s} {'Pérd%':>6s} {'MOS':>5s} {'Pagos p95':>10s}  Cumple voz / pagos")
         voz = f"{fmt(f.get('voz_subida_lat95_ms'), 0)}/{fmt(f.get('voz_bajada_lat95_ms'), 0)} ms"
-        print(f"    {f['fase']:16s} {f['hora_simulada']:14s} "
+        fase_txt = f["fase"] + ("*" if enlace_degradado(f) else "")
+        print(f"    {fase_txt:16s} {f['hora_simulada']:14s} "
               f"{fmt(f['uso_bajada_pct'], 0):>5s}/{fmt(f['uso_subida_pct'], 0):<4s} % "
               f"{voz:>16s} {fmt(f.get('voz_jitter_ms'), 2):>7s} "
               f"{fmt(f.get('voz_perdida_pct'), 2):>6s} {fmt(f.get('voz_mos'), 2):>5s} "
               f"{fmt(f.get('pagos_p95_ms'), 0):>7s} ms  {f.get('cumple_voz', '-')} / {f.get('cumple_pagos', '-')}")
-    otras = [f for f in filas if any(k in f for k in ("video_lat95_ms", "web_p95_ms", "respaldo_mbps"))]
+    otras = [f for f in filas if any(k in f for k in ("video_lat95_ms", "web_p95_ms", "respaldo_1gb_min"))]
     actual = None
     for f in otras:
         if (f["escenario"], f["estrategia"]) != actual:
             actual = (f["escenario"], f["estrategia"])
             print(f"\n  {f['escenario']} · {f['estrategia']} · otras métricas")
             print(f"    {'Fase':16s} {'Video p95/pérd':>15s} {'Web p95':>8s} {'Respaldo':>9s} {'1 GB en':>8s} "
-                  f"{'Descargas':>10s} {'T.real':>7s} {'Masivo':>7s} {'Restr.':>7s}  Cumple video / web")
+                  f"{'Descargas':>10s}   Ofrecido: {'T.real':>6s} {'Masivo':>7s} {'Restr.':>7s}  Cumple video / web")
         video = (f"{fmt(f.get('video_lat95_ms'), 0)} ms/{fmt(f.get('video_perdida_pct'), 1)}%"
                  if "video_lat95_ms" in f else "-")
         web = f"{fmt(f.get('web_p95_ms') / 1000 if f.get('web_p95_ms') else None, 1)} s" if "web_p95_ms" in f else "-"
-        gb = f"{fmt(f.get('respaldo_min_1gb'), 0)} min" if f.get("respaldo_min_1gb") else "-"
-        print(f"    {f['fase']:16s} {video:>15s} {web:>8s} {fmt(f.get('respaldo_mbps'), 1):>5s} Mb {gb:>8s} "
-              f"{fmt(f.get('descargas_mbps'), 1):>6s} Mb {fmt(f.get('mbps_tiempo_real'), 1):>4s} Mb "
-              f"{fmt(f.get('mbps_masivo'), 1):>4s} Mb {fmt(f.get('mbps_restringido'), 1):>4s} Mb  "
+        gb = f"{fmt(f.get('respaldo_1gb_min'), 0)} min" if f.get("respaldo_1gb_min") else "-"
+        fase_txt = f["fase"] + ("*" if enlace_degradado(f) else "")
+        print(f"    {fase_txt:16s} {video:>15s} {web:>8s} {fmt(f.get('respaldo_goodput_mbps'), 1):>5s} Mb {gb:>8s} "
+              f"{fmt(f.get('descargas_goodput_mbps'), 1):>6s} Mb             "
+              f"{fmt(f.get('ofrecido_tiempo_real_mbps'), 1):>4s} Mb "
+              f"{fmt(f.get('ofrecido_masivo_mbps'), 1):>4s} Mb {fmt(f.get('ofrecido_restringido_mbps'), 1):>4s} Mb  "
               f"{f.get('cumple_video', '-')} / {f.get('cumple_web', '-')}")
     print("\n    Voz y video: se miden en los dos sentidos; jitter, pérdida y MOS son los del peor.")
-    print("    Respaldo, descargas y Mbps por clase: telemetría de la sala (los dos sentidos); '1 GB en' = "
-          "cuánto tardaría un respaldo de 1 GB a ese ritmo.")
+    if any(enlace_degradado(f) for f in filas):
+        print("    * fase con el enlace del operador degradado (capacidad, pérdida o retardo: ver el CSV).")
+    print("    Respaldo y descargas: goodput (lo que llegó a la aplicación); '1 GB en' = cuánto tardaría un "
+          "respaldo de 1 GB a ese ritmo.\n    Ofrecido: lo que cada clase intentó pasar por el enlace de la sala "
+          "(telemetría, los dos sentidos, incluye lo descartado y retransmitido).")
 
 
 def main():
@@ -419,7 +450,8 @@ def main():
         for n, fases in planes.items():
             print(f"\n  {n} (semilla {args.semilla}, ruido {args.ruido})")
             for f in fases:
-                print(f"    {f['nombre']:16s} {f['duracion_s']:>4} s  sala: {f['sala']}")
+                enlace = f"  enlace del operador: {f['enlace']}" if f.get("enlace") else ""
+                print(f"    {f['nombre']:16s} {f['duracion_s']:>4} s  sala: {f['sala']}{enlace}")
                 if f["oficina"]:
                     print(f"    {'':16s} {'':>4}    oficina: {f['oficina']}")
         return
@@ -447,6 +479,7 @@ def main():
     telemetria = (cfg_tel["base_datos"], cfg_tel["intervalo_s"])
     try:
         emp.configurar(estrategia=ESTRATEGIAS[estrategias[0]])
+        operador = Operador.de_empresa(emp, avisar=lambda t: info(t + "\n"))
         info("*** Esperando 8 s a que los switches se conecten a Ryu\n")
         time.sleep(8)
         gen = Generador(emp.net, emp.inventario, semilla=args.semilla, perfiles=perfiles)
@@ -481,7 +514,7 @@ def main():
                     franja_ini = motor.actual if motor else None
                     fila, t0, t1 = correr_fase(emp, gen, args.sala, fase, sondas_de(datos, nombre), m,
                                                reloj, nombre, estrategia, telemetria=telemetria,
-                                               objetivos=datos.get("objetivos", {}))
+                                               objetivos=datos.get("objetivos", {}), operador=operador)
                     if motor:
                         fila["franja"] = (franja_ini if franja_ini == motor.actual
                                           else f"{franja_ini}->{motor.actual}")
@@ -502,6 +535,10 @@ def main():
         try:
             gen.detener()
         except NameError:
+            pass
+        try:
+            operador.normalizar()
+        except Exception:
             pass
         emp.limpiar()
         emp.net.stop()

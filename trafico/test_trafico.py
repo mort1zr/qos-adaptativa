@@ -121,6 +121,27 @@ class Perfiles(unittest.TestCase):
         self.assertIn("--nueva-conexion", argv)
         self.assertIn(a["destino"], ("inetpago1", "inetpago2"))
 
+    def test_goodput_solo_de_los_perfiles_medidos(self):
+        import json
+        import tempfile
+        from trafico import generador
+        gen = Generador(None, inventario(), semilla=7)
+        viejo = generador.DIR_MEDIDAS
+        generador.DIR_MEDIDAS = tempfile.mkdtemp()
+        try:
+            gen.medir = {"respaldo"}
+            a_resp = gen.plan("respaldo", 1)[0]
+            a_desc = gen.plan("descargas", 1)[0]
+            argv_resp = gen.comandos(a_resp, 30)[0][1]
+            self.assertIn("--salida", argv_resp)
+            self.assertNotIn("--salida", gen.comandos(a_desc, 30)[0][1])   # no se mide: sin salida
+            with open(argv_resp[argv_resp.index("--salida") + 1], "w") as f:
+                json.dump({"mbps": 8.5}, f)
+            self.assertEqual(gen.goodput(), {"respaldo": 8.5})
+            self.assertEqual(gen.goodput(), {})                            # ya se leyó
+        finally:
+            generador.DIR_MEDIDAS = viejo
+
     def test_servidores_necesarios(self):
         self.assertEqual(set(self.gen.servidores_necesarios()),
                          {"ofcms", "ofbak", "inetia", "inetstr", "inetupd", "inetweb", "inetpago1", "inetpago2"})
@@ -181,6 +202,19 @@ class Aplicaciones(unittest.TestCase):
         self.assertGreaterEqual(r["transacciones"], 9)
         self.assertEqual(r["errores"], 0)
         self.assertLessEqual(r["p50_ms"], r["p95_ms"])
+
+    def test_goodput_de_descarga_y_subida_en_json(self):
+        import json
+        import os
+        import tempfile
+        for patron in ("descarga", "subida"):
+            ruta = os.path.join(tempfile.mkdtemp(), "g.json")
+            bloques = ap.cliente("127.0.0.1", self.puerto, patron, 0.5, salida=ruta)
+            with open(ruta) as f:
+                r = json.load(f)
+            self.assertEqual(r["bytes"], bloques * ap.MB, patron)                  # bloques completos
+            self.assertAlmostEqual(r["mbps"], r["bytes"] * 8 / r["segundos"] / 1e6, delta=0.01 * r["mbps"] + 0.01)
+            self.assertGreater(r["mbps"], 1)
 
     def test_servidor_caido_cuenta_errores(self):
         import json

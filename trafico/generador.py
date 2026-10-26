@@ -13,6 +13,7 @@ Uso desde un script que ya levantó la red (escenarios, pruebas):
 plan() es puro (no toca la red): devuelve qué equipo habla con cuál y con qué
 parámetros. Con la misma semilla, el plan es siempre el mismo.
 """
+import json
 import os
 import random
 import subprocess
@@ -24,6 +25,7 @@ AQUI = os.path.dirname(os.path.abspath(__file__))
 PERFILES = os.path.join(AQUI, "perfiles.yaml")
 APLICACIONES = os.path.join(AQUI, "aplicaciones.py")
 PUERTO_TCP = 443
+DIR_MEDIDAS = "/tmp/qos_mediciones/goodput"
 PUERTOS_UDP = (16384, 32767)            # rango típico de RTP
 TIPOS_MAQUINA = ("tragamonedas", "derby", "ruleta")
 CAMPOS_OBLIGATORIOS = ("sedes", "origen", "destino", "cantidad", "transporte", "clase_esperada")
@@ -68,6 +70,8 @@ class Generador:
         self.perfiles: Dict[str, dict] = self.datos["perfiles"]
         self.variacion = self.datos.get("variacion_defecto", 0.3)
         self.python = python
+        self.medir = set()          # perfiles TCP masivos cuyo goodput se mide (descargas, respaldo)
+        self._medidas = []          # (perfil, ruta del JSON) de lo lanzado desde el último goodput()
         self.procesos = []          # (accion, Popen)
         self.lanzadas: List[dict] = []
 
@@ -142,6 +146,13 @@ class Generador:
             argv = base + ["cliente", "--destino", a["destino_ip"], "--puerto", str(a["puerto"]),
                            "--patron", a["patron"], "--duracion", str(duracion),
                            "--semilla", str(a["semilla"])]
+            if a["patron"] in ("descarga", "subida") and a["perfil"] in self.medir:
+                ruta = os.path.join(DIR_MEDIDAS, f"{a['perfil']}_{a['origen']}_{len(self._medidas)}.json")
+                os.makedirs(DIR_MEDIDAS, exist_ok=True)
+                if os.path.exists(ruta):
+                    os.remove(ruta)
+                self._medidas.append((a["perfil"], ruta))
+                argv += ["--salida", ruta]
             if a["patron"] == "transacciones":
                 argv += ["--peticion", str(a["peticion"]), "--respuesta", str(a["respuesta"]),
                          "--variacion", str(a["variacion"])]
@@ -198,6 +209,19 @@ class Generador:
             i = intensidades.get(perfil, 0.0 if perfil in excluir else 1.0)
             acciones += self.iniciar(perfil, sede, duracion, i)
         return acciones
+
+    def goodput(self) -> Dict[str, float]:
+        """Mbps que llegaron de verdad, por perfil medido, desde la última llamada.
+        Llamar después de esperar(): cada aplicación deja su JSON al terminar."""
+        total: Dict[str, float] = {}
+        for perfil, ruta in self._medidas:
+            try:
+                with open(ruta) as f:
+                    total[perfil] = total.get(perfil, 0.0) + float(json.load(f).get("mbps", 0.0))
+            except (OSError, ValueError):
+                total.setdefault(perfil, 0.0)
+        self._medidas = []
+        return {k: round(v, 2) for k, v in total.items()}
 
     def esperar(self, limite: float = 30):
         for a, p in self.procesos:

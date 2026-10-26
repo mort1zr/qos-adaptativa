@@ -34,6 +34,7 @@ Compatible con Python 3.9.
 import argparse
 import json
 import random
+import signal
 import socket
 import socketserver
 import struct
@@ -153,8 +154,12 @@ def cliente(destino, puerto, patron, duracion, peticion=1000, respuesta=10000, t
             _guardar(salida, resumen_tiempos(tiempos, errores))
             return 0
     hechas = 0
+    masivo = patron in ("descarga", "subida")
+    inicio = ultimo = time.time()
     try:
-        if patron in ("descarga", "subida"):
+        if masivo:
+            # Goodput: lo que llegó de verdad a la aplicación. Se cuentan bloques de 1 MB
+            # completos (en la subida, confirmados por el servidor) y el tiempo hasta el último.
             while time.time() < fin:
                 if patron == "descarga":
                     s.sendall(CABECERA.pack(b"D", MB, 0))
@@ -164,6 +169,7 @@ def cliente(destino, puerto, patron, duracion, peticion=1000, respuesta=10000, t
                     _enviar(s, MB)
                     _recibir_exacto(s, 1)
                 hechas += 1
+                ultimo = time.time()
             return hechas
         # transacciones: llegadas al azar (Poisson) o periódicas
         proxima = time.time() + (rng.expovariate(tasa) if tasa else rng.uniform(0, periodo))
@@ -195,7 +201,12 @@ def cliente(destino, puerto, patron, duracion, peticion=1000, respuesta=10000, t
     finally:
         if s:
             s.close()
-        _guardar(salida, resumen_tiempos(tiempos, errores))
+        if masivo:
+            segundos = max(ultimo - inicio, 1e-3)
+            _guardar(salida, {"bytes": hechas * MB, "segundos": round(segundos, 2),
+                              "mbps": round(hechas * MB * 8 / segundos / 1e6, 3), "errores": errores})
+        else:
+            _guardar(salida, resumen_tiempos(tiempos, errores))
 
 
 def _guardar(salida, datos):
@@ -261,8 +272,11 @@ def main():
     p.add_argument("--variacion", type=float, default=0.3)
     p.add_argument("--mbps", type=float, default=1.0)
     p.add_argument("--largo", type=int, default=1200)
-    p.add_argument("--salida", help="cliente: archivo JSON con los tiempos de respuesta")
+    p.add_argument("--salida", help="cliente: JSON con los tiempos de respuesta (transacciones) "
+                                    "o con el goodput (descarga, subida)")
     a = p.parse_args()
+    # Si el escenario la detiene (terminate), igual guarda su resultado.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     if a.modo == "servidor":
         servidor(a.puerto, a.duracion)
     elif a.modo == "cliente":
