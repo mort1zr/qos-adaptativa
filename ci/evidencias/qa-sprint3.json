@@ -1,0 +1,362 @@
+{
+  "version": 1,
+  "comando": "/usr/bin/python3 demo/qa_sprint3.py --red",
+  "fuentes_qa_sha256": {
+    "demo/qa_sprint3.py": "ecf09b176dbd1e0c4c08ba23a8a4cd2e8ec956521e77184f0a71ef1954ff7400",
+    "demo/test_qa_sprint3.py": "951581aa95ce0f55b75ccd06cdeb69b16bf56e56f4e5068fa44823e715e3a184"
+  },
+  "resultado_funcional": {
+    "version": 1,
+    "inicio_utc": "2026-10-27T03:59:47.307522+00:00",
+    "fin_utc": "2026-10-27T04:13:14.382050+00:00",
+    "modo": "red_real",
+    "estado": "APROBADO_CON_PENDIENTES",
+    "resumen": {
+      "APROBADO": 11,
+      "NO_EJECUTADO": 1
+    },
+    "casos": [
+      {
+        "id": "QA-01",
+        "nombre": "Entorno y rama",
+        "estado": "APROBADO",
+        "segundos": 0.3,
+        "detalle": {
+          "rama": "demo-consola",
+          "python": "3.10.12",
+          "kernel": "6.8.0-138-generic",
+          "git": "d3fa14fd11ce0fd2cf15f5614669d2dcd45df5d0",
+          "main_local": "86782458ae549a68a46e92102a7c8959065a6ddc"
+        }
+      },
+      {
+        "id": "QA-02",
+        "nombre": "Pruebas automatizadas",
+        "estado": "APROBADO",
+        "segundos": 24.52,
+        "detalle": {
+          "tests": 198,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1,
+          "omitidas": [
+            {
+              "prueba": "escenarios.test_escenarios.Csv.test_el_archivo_vuelve_al_usuario_de_sudo",
+              "motivo": "solo con sudo"
+            }
+          ]
+        }
+      },
+      {
+        "id": "QA-00",
+        "nombre": "Laboratorio disponible para QA",
+        "estado": "APROBADO",
+        "segundos": 21.22,
+        "detalle": {
+          "red_inicial": "levantada",
+          "espera_api_tras_limpieza": true
+        }
+      },
+      {
+        "id": "QA-03",
+        "nombre": "Reinicio del controlador y acceso a HTML",
+        "estado": "APROBADO",
+        "segundos": 13.31,
+        "detalle": {
+          "controlador_reiniciado": true,
+          "html_consola_y_panel": true,
+          "alcance": "Reinicio de Docker por API; no reinicia el proceso del orquestador."
+        }
+      },
+      {
+        "id": "QA-04",
+        "nombre": "Red e inventario",
+        "estado": "APROBADO",
+        "segundos": 34.58,
+        "detalle": {
+          "equipos": 276,
+          "switches": 44,
+          "conectados": 44
+        }
+      },
+      {
+        "id": "QA-05",
+        "nombre": "Reglas, colas y QoS",
+        "estado": "APROBADO",
+        "segundos": 0.57,
+        "detalle": {
+          "tipos": [
+            "switches",
+            "reglas",
+            "colas",
+            "qos"
+          ],
+          "sala": 1,
+          "clasificador_activado": "destino"
+        }
+      },
+      {
+        "id": "QA-07",
+        "nombre": "Cancelar tráfico y rechazar acciones incompatibles",
+        "estado": "APROBADO",
+        "segundos": 107.95,
+        "detalle": {
+          "cancelacion_s": 21.0,
+          "switches_conectados_al_final": 0,
+          "rechazos_verificados": [
+            "segundo escenario:409",
+            "clasificador durante escenario:409",
+            "sala inválida:400"
+          ]
+        }
+      },
+      {
+        "id": "QA-06",
+        "nombre": "Comparación completa después de cancelar",
+        "estado": "APROBADO",
+        "segundos": 398.06,
+        "detalle": {
+          "fases": [
+            {
+              "estrategia": "sin_qos",
+              "fase": "normal",
+              "cpu_pct": 24.6,
+              "voz_lat95_ms": 98.04,
+              "voz_mos": 4.35,
+              "pagos_p95_ms": 216.1,
+              "web_p95_ms": 573.0,
+              "valida": true
+            },
+            {
+              "estrategia": "sin_qos",
+              "fase": "respaldo",
+              "cpu_pct": 39.9,
+              "voz_lat95_ms": 423.01,
+              "voz_mos": 2.92,
+              "pagos_p95_ms": 848.3,
+              "web_p95_ms": 5709.8,
+              "valida": true
+            },
+            {
+              "estrategia": "sin_qos",
+              "fase": "normal_otra_vez",
+              "cpu_pct": 32.7,
+              "voz_lat95_ms": 96.12,
+              "voz_mos": 4.35,
+              "pagos_p95_ms": 51.1,
+              "web_p95_ms": 401.9,
+              "valida": true
+            },
+            {
+              "estrategia": "prioridad",
+              "fase": "normal",
+              "cpu_pct": 32.5,
+              "voz_lat95_ms": 11.61,
+              "voz_mos": 4.4,
+              "pagos_p95_ms": 32.4,
+              "web_p95_ms": 356.1,
+              "valida": true
+            },
+            {
+              "estrategia": "prioridad",
+              "fase": "respaldo",
+              "cpu_pct": 45.8,
+              "voz_lat95_ms": 16.65,
+              "voz_mos": 3.2,
+              "pagos_p95_ms": 34.9,
+              "web_p95_ms": 2362.1,
+              "valida": true
+            },
+            {
+              "estrategia": "prioridad",
+              "fase": "normal_otra_vez",
+              "cpu_pct": 63.1,
+              "voz_lat95_ms": 17.67,
+              "voz_mos": 4.39,
+              "pagos_p95_ms": 37.9,
+              "web_p95_ms": 391.1,
+              "valida": true
+            }
+          ],
+          "invalidas": [],
+          "criterio": "Funcionamiento y mediciones; no se exige reproducir cifras anteriores ni demostrar superioridad."
+        }
+      },
+      {
+        "id": "QA-08",
+        "nombre": "Apagado y segundo arranque de la red",
+        "estado": "APROBADO",
+        "segundos": 206.53,
+        "detalle": {
+          "arranques_red": 2,
+          "switches_conectados": 44,
+          "alcance": "Segundo arranque de la red sin reiniciar Ubuntu ni el orquestador."
+        }
+      },
+      {
+        "id": "QA-REST",
+        "nombre": "Restaurar el estado inicial del laboratorio",
+        "estado": "APROBADO",
+        "segundos": 0.02,
+        "detalle": {}
+      },
+      {
+        "id": "QA-HASH",
+        "nombre": "Conservar políticas, topología y resultados históricos",
+        "estado": "APROBADO",
+        "segundos": 0.02,
+        "detalle": {
+          "archivos_verificados": 21
+        }
+      },
+      {
+        "id": "QA-09",
+        "nombre": "Reinicio de Ubuntu y del proceso del orquestador",
+        "estado": "NO_EJECUTADO",
+        "detalle": {
+          "motivo": "Requiere cierre y apertura de la sesión; no se acredita con reiniciar Docker"
+        }
+      }
+    ]
+  },
+  "objetivos_de_servicio": [
+    {
+      "estrategia": "sin_qos",
+      "fase": "normal",
+      "voz_jitter_ms": 3.66,
+      "voz_perdida_pct": 0.0,
+      "cumple": {
+        "cumple_voz": "sí",
+        "cumple_video": "sí",
+        "cumple_web": "sí",
+        "cumple_pagos": "sí"
+      }
+    },
+    {
+      "estrategia": "sin_qos",
+      "fase": "respaldo",
+      "voz_jitter_ms": 27.0,
+      "voz_perdida_pct": 0.0,
+      "cumple": {
+        "cumple_voz": "no (latencia p95, MOS)",
+        "cumple_video": "no (latencia p95)",
+        "cumple_web": "no",
+        "cumple_pagos": "no"
+      }
+    },
+    {
+      "estrategia": "sin_qos",
+      "fase": "normal_otra_vez",
+      "voz_jitter_ms": 3.82,
+      "voz_perdida_pct": 0.0,
+      "cumple": {
+        "cumple_voz": "sí",
+        "cumple_video": "sí",
+        "cumple_web": "sí",
+        "cumple_pagos": "sí"
+      }
+    },
+    {
+      "estrategia": "prioridad",
+      "fase": "normal",
+      "voz_jitter_ms": 0.8,
+      "voz_perdida_pct": 0.0,
+      "cumple": {
+        "cumple_voz": "sí",
+        "cumple_video": "sí",
+        "cumple_web": "sí",
+        "cumple_pagos": "sí"
+      }
+    },
+    {
+      "estrategia": "prioridad",
+      "fase": "respaldo",
+      "voz_jitter_ms": 9.62,
+      "voz_perdida_pct": 12.04,
+      "cumple": {
+        "cumple_voz": "no (pérdida, MOS)",
+        "cumple_video": "no (pérdida)",
+        "cumple_web": "sí",
+        "cumple_pagos": "sí"
+      }
+    },
+    {
+      "estrategia": "prioridad",
+      "fase": "normal_otra_vez",
+      "voz_jitter_ms": 2.33,
+      "voz_perdida_pct": 0.0,
+      "cumple": {
+        "cumple_voz": "sí",
+        "cumple_video": "sí",
+        "cumple_web": "sí",
+        "cumple_pagos": "sí"
+      }
+    }
+  ],
+  "hallazgos": [
+    {
+      "id": "QOS-01",
+      "estado": "PENDIENTE_DE_INVESTIGACION",
+      "descripcion": "En prioridad/respaldo hubo 12.04 % de pérdida de voz y MOS 3.2; no cumple pérdida ni MOS. La latencia p95 fue 16.65 ms, frente a 423.01 ms sin_qos. La causa no está establecida.",
+      "criterio": "Una fase válida por CPU no acredita por sí sola el cumplimiento de QoS."
+    },
+    {
+      "id": "QA-GUION-01",
+      "estado": "CORREGIDO_Y_VERIFICADO",
+      "descripcion": "Se añadió espera acotada de recuperación de la API después de la limpieza de Mininet. Un 503 transitorio no se interpreta como cero switches."
+    },
+    {
+      "id": "QA-GUION-02",
+      "estado": "CORREGIDO_Y_VERIFICADO",
+      "descripcion": "Se activa destino explícitamente para revisar set_queue; un controlador nuevo inicia con ninguno. Se restaura el clasificador inicial al terminar."
+    }
+  ],
+  "intentos_previos": [
+    {
+      "inicio_utc": "2026-10-27T03:55:05.973967+00:00",
+      "estado": "FALLIDO",
+      "fallos": [
+        {
+          "id": "QA-00",
+          "nombre": "Laboratorio disponible para QA",
+          "estado": "FALLIDO",
+          "segundos": 23.63,
+          "detalle": {
+            "error": "/qos/estado respondió 503: {\"error\": \"El controlador está apagado.\"}"
+          }
+        },
+        {
+          "id": "QA-REST",
+          "nombre": "Restaurar el estado inicial del laboratorio",
+          "estado": "FALLIDO",
+          "segundos": 0.01,
+          "detalle": {
+            "error": "/qos/estado respondió 503: {\"error\": \"El controlador está apagado.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "inicio_utc": "2026-10-27T03:57:21.029012+00:00",
+      "estado": "FALLIDO",
+      "fallos": [
+        {
+          "id": "QA-05",
+          "nombre": "Reglas, colas y QoS",
+          "estado": "FALLIDO",
+          "segundos": 0.06,
+          "detalle": {
+            "error": "Evidencia sin set_queue:"
+          }
+        }
+      ]
+    }
+  ],
+  "limites": [
+    "No se reinició Ubuntu ni el proceso del orquestador.",
+    "No se verificó la lista completa de aceptación de la especificación.",
+    "Una comparación no sustituye una campaña estadística repetida.",
+    "No se ejecutó Azure DevOps ni se implementó IA.",
+    "Los archivos detallados y registros de cada intento permanecen en datos/qa, ignorado por Git."
+  ]
+}
