@@ -11,3 +11,7 @@ topologia/switches.csv
 resultados-pruebas*.xml
 estado-contenedor.json
 ryu-ci.log
+
+# Corridas de presentación separadas de la tesis
+experimentos/resultados/demo*.csv
+despliegue.json

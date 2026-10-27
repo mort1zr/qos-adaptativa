@@ -1,0 +1,7 @@
+controlador: lab
+venv: .venv/bin/ryu-manager
+datapath: kernel
+resultados_demo: experimentos/resultados/demo.csv
+escala_rapida: 0.5
+salas: [1, 2, 3, 4]
+estrategias: [sin_qos, fila_corta, prioridad, estatica]

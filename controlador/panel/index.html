@@ -162,6 +162,19 @@ async function actualizar() {
     $("p-decision").textContent = estado.decision_ms.p95 == null ? "–" : `${estado.decision_ms.p95.toFixed(2)} ms`;
     $("p-hora").textContent = new Date(datos.ahora * 1000).toLocaleTimeString();
     pintarClasificadores(estado);
+    if (new URLSearchParams(location.search).has("demo")) {
+      try {
+        const demo = await leer("/demo/estado");
+        const bloqueado = demo.vista_previa || (demo.trabajo.tipo === "escenario" &&
+          ["iniciando", "corriendo"].includes(demo.trabajo.estado));
+        $("clasificadores").querySelectorAll("button").forEach(b => {
+          b.disabled = bloqueado;
+          if (bloqueado) b.title = "El escenario controla el clasificador o la vista es de solo lectura";
+        });
+      } catch (_) {
+        $("clasificadores").querySelectorAll("button").forEach(b => { b.disabled = true; });
+      }
+    }
 
     const sedes = [...new Set([...Object.keys(serie), ...datos.clases.map(c => String(c.sede_id))])]
       .filter(s => s !== "null").sort((a, b) => a - b);

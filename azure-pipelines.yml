@@ -111,7 +111,7 @@ stages:
               set -e
               ci/preparar_python.sh python3
               PYTHONPATH="$(cat .ci-pythonpath)" "$(cat .ci-python)" -m pyflakes \
-                controlador escenarios trafico experimentos politicas topologia ci
+                controlador escenarios trafico experimentos politicas topologia ci demo
               echo "Sin avisos de pyflakes."
             displayName: Revisar el código
 
