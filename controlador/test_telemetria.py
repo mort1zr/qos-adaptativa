@@ -10,7 +10,8 @@ import tempfile
 import unittest
 
 from controlador.inventario import Inventario
-from controlador.telemetria import Telemetria, demanda, percentil, resumen_decisiones, uso_enlaces
+from controlador.telemetria import (Telemetria, datos_panel, demanda, percentil, resumen_decisiones,
+                                    serie_enlaces, uso_enlaces)
 from politicas.cargador import cargar
 
 INVENTARIO = """nombre,sede_id,sede,segmento,tipo,ip,gateway,detalle,area
@@ -152,6 +153,17 @@ class Telemetria_(unittest.TestCase):
         self.assertIsNone(fila["descartes"])
         self.assertAlmostEqual(fila["mbps"], 1.0)
 
+    def test_bytes_no_disponibles_y_puerto_recreado(self):
+        p = lambda b: [{"port_no": 2, "tx_bytes": b, "tx_packets": b // 1000, "tx_dropped": 0}]  # noqa: E731
+        self.tel.registrar_puertos(15, p(1_000_000), ts=0)
+        # Lectura "no disponible": no se guarda ni cambia la referencia.
+        self.assertEqual(self.tel.registrar_puertos(15, p(2 ** 64 - 1), ts=5), [])
+        self.assertAlmostEqual(self.tel.registrar_puertos(15, p(4_750_000), ts=10)[0]["mbps"], 3.0)
+        # Red rearmada: el contador vuelve a empezar; esa lectura es solo referencia.
+        self.assertEqual(self.tel.registrar_puertos(15, p(500_000), ts=15), [])
+        self.assertAlmostEqual(self.tel.registrar_puertos(15, p(1_125_000), ts=20)[0]["mbps"], 1.0)
+        self.assertLess(max(f["maximo_mbps"] for f in uso_enlaces(self.db, 10, ahora=21)), 31)
+
     def test_retencion_borra_el_detalle_pero_no_el_agregado(self):
         self.tel.registrar_flujos(5, [muestra("203.0.113.40", "10.0.20.11", 1, 1000, duracion=1)], ts=0)
         self.assertEqual(self.tel.limpiar(ts=25 * 3600), 1)
@@ -196,6 +208,44 @@ class Telemetria_(unittest.TestCase):
         self.assertIsNone(percentil([], 95))
         self.assertEqual(percentil([5, 1, 3], 50), 3)
         self.assertEqual(percentil(list(range(1, 101)), 95), 95)
+
+    def test_datos_del_panel(self):
+        # Sala 1: un teléfono (voz) y un cliente WiFi viendo streaming; Oficina: una descarga.
+        for ts, k in ((100, 1), (105, 2)):
+            self.tel.registrar_flujos(15, [muestra("10.1.20.13", "10.0.10.14", 2, 40_000 * k, duracion=5),
+                                           muestra("203.0.113.30", "10.1.60.10", 1, 625_000 * k, duracion=5)],
+                                      ts=ts)
+            self.tel.registrar_flujos(5, [muestra("203.0.113.40", "10.0.20.11", 1, 1_250_000 * k, duracion=5)],
+                                      ts=ts)
+        self.tel.registrar_decisiones([{"ts": 101, "clasificador": "destino", "clase": "tiempo_real", "cola": 1,
+                                        "ms": 0.8, "via": "proactiva"}])
+        d = datos_panel(self.db, minutos=5, ahora=106)
+        self.assertEqual(d["ahora"], 106)
+        self.assertEqual([(a["area"], a["clase"]) for a in d["areas"]],
+                         [("Contabilidad", "masivo"), ("WiFi clientes", "restringido"), ("Telefonía", "tiempo_real")])
+        self.assertAlmostEqual(d["areas"][0]["mbps"], 2.0, places=2)
+        self.assertEqual({(c["sede_id"], c["clase"]) for c in d["clases"]},
+                         {(0, "masivo"), (1, "restringido"), (1, "tiempo_real")})
+        self.assertEqual((d["decisiones"][0]["clase"], d["decisiones"][0]["proactivas"]), ("tiempo_real", 1))
+
+    def test_panel_con_base_vacia(self):
+        vacia = os.path.join(self.dir, "vacia.db")
+        sqlite3.connect(vacia).close()
+        d = datos_panel(vacia, minutos=5, ahora=10)
+        self.assertEqual((d["enlaces"], d["clases"], d["areas"], d["decisiones"]), ([], [], [], []))
+        self.assertEqual(serie_enlaces(vacia, 10, ahora=10), {})
+
+    def test_serie_de_los_enlaces(self):
+        p = lambda b1, b2: [{"port_no": 1, "tx_bytes": b1, "tx_packets": 0, "tx_dropped": 0},  # noqa: E731
+                            {"port_no": 2, "tx_bytes": b2, "tx_packets": 0, "tx_dropped": 0}]
+        for i, ts in enumerate((0, 5, 10)):
+            self.tel.registrar_puertos(15, p(625_000 * i, 1_875_000 * i), ts=ts)
+        s = serie_enlaces(self.db, minutos=10, ahora=11)
+        self.assertEqual(list(s), ["1"])
+        self.assertEqual(s["1"]["_capacidad"], 30)
+        self.assertEqual(s["1"]["bajada"], [[5, 3.0], [10, 3.0]])
+        self.assertEqual(s["1"]["subida"], [[5, 1.0], [10, 1.0]])
+        self.assertEqual(serie_enlaces(self.db, minutos=0.05, ahora=11)["1"]["bajada"], [[10, 3.0]])
 
     def test_inventario_se_recarga_si_cambia(self):
         inv = self.tel.inv

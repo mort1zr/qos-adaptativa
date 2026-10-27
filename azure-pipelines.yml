@@ -1,0 +1,218 @@
+# Pipeline de CI/CD del proyecto QoS adaptativa (Azure DevOps Pipelines).
+# Cómo crearlo y cómo instalar el agente en la VM: ci/README.md
+#
+#   CI  Calidad      -> pruebas unitarias en Python 3.9 (la del .venv de Ryu) y 3.10 (la del
+#                       sistema, con la que corren Mininet y los escenarios) + lint con pyflakes
+#   CI  Contenedor   -> construye la imagen del controlador y prueba que arranque (API y panel)
+#   CI  Integración  -> opcional: Mininet + OVS reales con ese contenedor (prueba_destinos.py)
+#   CD  Despliegue   -> solo en main: pone esa imagen como el controlador del laboratorio
+#                       (ambiente "laboratorio"), verifica que responda y si no, vuelve atrás
+#
+# Por defecto corre en el agente propio "Laboratorio" (la VM de Ubuntu), que en Azure DevOps
+# es gratis sin suscripción. Los agentes de Microsoft necesitan una suscripción de Azure
+# vinculada para el nivel gratuito; con ella se puede elegir agente=microsoft al lanzarlo.
+
+name: $(Date:yyyyMMdd)$(Rev:.r)
+
+trigger:
+  branches:
+    include: [main]
+  paths:
+    exclude:
+      - experimentos/resultados/*
+
+pr:
+  branches:
+    include: [main]
+
+parameters:
+  - name: agente
+    displayName: Dónde corre
+    type: string
+    default: laboratorio
+    values: [laboratorio, microsoft]
+  - name: integracion
+    displayName: Prueba de integración con Mininet (solo laboratorio, ~3 min)
+    type: boolean
+    default: false
+  - name: ryu
+    displayName: Ruta a ryu-manager si no hay Docker (p. ej. /home/usuario/qos-adaptativa/.venv/bin/ryu-manager)
+    type: string
+    default: ' '
+  - name: desplegar
+    displayName: Desplegar al laboratorio si todo pasa (solo rama main)
+    type: boolean
+    default: true
+  - name: carpetaLab
+    displayName: Carpeta del proyecto en la VM (vacío = ~/qos-adaptativa)
+    type: string
+    default: ' '
+
+variables:
+  IMAGEN: qos-controlador:ci
+
+stages:
+  # ------------------------------------------------------------------ Calidad
+  - stage: Calidad
+    displayName: Pruebas y lint
+    pool:
+      ${{ if eq(parameters.agente, 'microsoft') }}:
+        vmImage: ubuntu-22.04
+      ${{ else }}:
+        name: Laboratorio
+    jobs:
+      - job: Pruebas
+        displayName: Pruebas unitarias
+        strategy:
+          matrix:
+            Python_3_9:
+              PY_VERSION: '3.9'
+            Python_3_10:
+              PY_VERSION: '3.10'
+        steps:
+          - checkout: self
+            clean: true
+          - ${{ if eq(parameters.agente, 'microsoft') }}:
+              - task: UsePythonVersion@0
+                displayName: Python $(PY_VERSION) del agente de Microsoft
+                inputs:
+                  versionSpec: $(PY_VERSION)
+          - bash: |
+              set +e
+              ci/preparar_python.sh "python$(PY_VERSION)"
+              codigo=$?
+              if [ $codigo -eq 3 ]; then
+                echo "##vso[task.logissue type=warning]Python $(PY_VERSION) no está instalado en el agente: se omiten sus pruebas."
+                echo "##vso[task.setvariable variable=OMITIR]true"
+                exit 0
+              fi
+              exit $codigo
+            displayName: Preparar Python $(PY_VERSION)
+          - bash: |
+              PYTHONPATH="$(cat .ci-pythonpath)" "$(cat .ci-python)" ci/pruebas_junit.py \
+                --salida "$(Common.TestResultsDirectory)/pruebas-$(PY_VERSION).xml" --nombre "Python $(PY_VERSION)"
+            displayName: Correr las pruebas
+            condition: and(succeeded(), ne(variables.OMITIR, 'true'))
+          - task: PublishTestResults@2
+            displayName: Publicar resultados
+            condition: and(succeededOrFailed(), ne(variables.OMITIR, 'true'))
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: $(Common.TestResultsDirectory)/pruebas-*.xml
+              testRunTitle: Pruebas unitarias · Python $(PY_VERSION)
+              failTaskOnFailedTests: true
+
+      - job: Lint
+        displayName: Lint (pyflakes)
+        steps:
+          - checkout: self
+            clean: true
+          - bash: |
+              set -e
+              ci/preparar_python.sh python3
+              PYTHONPATH="$(cat .ci-pythonpath)" "$(cat .ci-python)" -m pyflakes \
+                controlador escenarios trafico experimentos politicas topologia ci
+              echo "Sin avisos de pyflakes."
+            displayName: Revisar el código
+
+  # --------------------------------------------------------------- Contenedor
+  - stage: Contenedor
+    displayName: Imagen del controlador
+    dependsOn: Calidad
+    pool:
+      ${{ if eq(parameters.agente, 'microsoft') }}:
+        vmImage: ubuntu-22.04
+      ${{ else }}:
+        name: Laboratorio
+    jobs:
+      - job: Imagen
+        displayName: Construir y probar la imagen
+        steps:
+          - checkout: self
+            clean: true
+          - bash: ci/imagen.sh
+            name: imagen
+            displayName: docker build + prueba de humo
+            env:
+              IMAGEN: $(IMAGEN)
+          # Con una suscripción de Azure, aquí iría el push a Azure Container Registry:
+          # - task: Docker@2
+          #   inputs:
+          #     command: push
+          #     containerRegistry: <conexión de servicio al ACR>
+          #     repository: qos-controlador
+          #     tags: $(Build.BuildNumber)
+          - task: PublishPipelineArtifact@1
+            displayName: Guardar el estado que devolvió el contenedor
+            condition: and(succeeded(), eq(variables['imagen.HAY_IMAGEN'], 'true'))
+            inputs:
+              targetPath: estado-contenedor.json
+              artifact: contenedor
+
+  # -------------------------------------------------------------- Integración
+  - ${{ if and(parameters.integracion, eq(parameters.agente, 'laboratorio')) }}:
+      - stage: Integracion
+        displayName: Integración con Mininet
+        dependsOn: Contenedor
+        pool:
+          name: Laboratorio
+        jobs:
+          - job: Mininet
+            displayName: prueba_destinos.py con el controlador
+            timeoutInMinutes: 15
+            steps:
+              - checkout: self
+                clean: true
+              - bash: ci/integracion.sh
+                displayName: Mininet + OVS + controlador
+                env:
+                  IMAGEN: $(IMAGEN)
+                  RYU_MANAGER: ${{ parameters.ryu }}
+              - bash: |
+                  mkdir -p "$(Build.ArtifactStagingDirectory)/integracion"
+                  cp -v experimentos/resultados/prueba_destinos.csv ryu-ci.log \
+                    "$(Build.ArtifactStagingDirectory)/integracion/" 2>/dev/null || true
+                displayName: Juntar la evidencia
+                condition: always()
+              - task: PublishPipelineArtifact@1
+                displayName: Guardar resultados y registro del controlador
+                condition: always()
+                inputs:
+                  targetPath: $(Build.ArtifactStagingDirectory)/integracion
+                  artifact: integracion
+
+  # --------------------------------------------------------------- Despliegue
+  # Entrega continua al ambiente "laboratorio" (la VM). Azure DevOps lo crea solo en la
+  # primera corrida; en Pipelines > Environments > laboratorio se le pueden poner
+  # aprobaciones (alguien aprueba antes de desplegar) y se ve el historial de versiones.
+  - ${{ if and(parameters.desplegar, eq(parameters.agente, 'laboratorio')) }}:
+      - stage: Despliegue
+        displayName: Despliegue al laboratorio (CD)
+        ${{ if parameters.integracion }}:
+          dependsOn: [Contenedor, Integracion]
+        ${{ else }}:
+          dependsOn: [Contenedor]
+        condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['Build.Reason'], 'PullRequest'))
+        pool:
+          name: Laboratorio
+        jobs:
+          - deployment: Controlador
+            displayName: Desplegar el controlador
+            environment: laboratorio
+            strategy:
+              runOnce:
+                deploy:
+                  steps:
+                    - checkout: self
+                      clean: true
+                    - bash: ci/desplegar.sh
+                      displayName: Desplegar, verificar y volver atrás si falla
+                      env:
+                        IMAGEN: $(IMAGEN)
+                        VERSION: $(Build.BuildNumber)
+                        QOS_LAB_DIR: ${{ parameters.carpetaLab }}
+                    - task: PublishPipelineArtifact@1
+                      displayName: Guardar qué versión quedó desplegada
+                      inputs:
+                        targetPath: despliegue.json
+                        artifact: despliegue

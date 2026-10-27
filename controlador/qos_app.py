@@ -37,6 +37,9 @@ caliente con la API REST, que solo escucha en esta máquina:
 clasificador se borran las reglas por flujo, para que cada flujo se vuelva a
 decidir con el nuevo.
 
+Panel en vivo (uso de los enlaces, demanda por clase y área, decisiones):
+    http://127.0.0.1:8080/panel
+
 El rol de cada switch lo lee de topologia/switches.csv, que escribe la
 topología al construirse.
 """
@@ -63,7 +66,8 @@ from webob import Response  # noqa: E402
 
 from controlador.clasificadores import CLASIFICADORES, armar_flujo, crear, red_para_openflow  # noqa: E402
 from controlador.inventario import Inventario  # noqa: E402
-from controlador.telemetria import Telemetria, leer_config, percentil  # noqa: E402
+from controlador.telemetria import (Telemetria, datos_panel, leer_config, percentil,  # noqa: E402
+                                    serie_enlaces)
 from politicas.cargador import cargar  # noqa: E402
 
 COOKIE_FLUJO = 0x16          # reglas por flujo de esta aplicación (las de prueba de PCIII-15 usan 0x15)
@@ -75,6 +79,7 @@ RECIENTE_S = 2.0             # no reinstalar la misma regla por flujo dentro de 
 PRIORIDAD_ARP = 5
 PRIORIDAD_L2 = 1
 API = "qos_app"
+PANEL = os.path.join(RAIZ, "controlador", "panel", "index.html")
 
 # La API REST solo escucha en esta máquina (Ryu, por defecto, abre 0.0.0.0:8080).
 # En una red real la API "hacia el norte" del controlador va además autenticada.
@@ -371,6 +376,13 @@ class QoSApp(app_manager.RyuApp):
             self.logger.exception("Error al guardar un flujo vencido")
 
 
+def _minutos(req, defecto):
+    try:
+        return min(max(float(req.GET.get("minutos", defecto)), 0.5), 60)
+    except ValueError:
+        return defecto
+
+
 def _json(obj, estado=200):
     return Response(status=estado, content_type="application/json", charset="utf-8",
                     body=json.dumps(obj, ensure_ascii=False).encode("utf-8"))
@@ -386,6 +398,19 @@ class QoSRest(ControllerBase):
     @route("qos", "/qos/estado", methods=["GET"])
     def estado(self, req, **kwargs):
         return _json(self.app.estado())
+
+    @route("qos", "/qos/telemetria", methods=["GET"])
+    def telemetria(self, req, **kwargs):
+        return _json(datos_panel(self.app.cfg["base_datos"], _minutos(req, 5)))
+
+    @route("qos", "/qos/serie", methods=["GET"])
+    def serie(self, req, **kwargs):
+        return _json(serie_enlaces(self.app.cfg["base_datos"], _minutos(req, 10)))
+
+    @route("panel", "/panel", methods=["GET"])
+    def panel(self, req, **kwargs):
+        with open(PANEL, "rb") as f:
+            return Response(status=200, content_type="text/html", charset="utf-8", body=f.read())
 
     @route("qos", "/qos/clasificador", methods=["PUT", "POST"])
     def clasificador(self, req, **kwargs):

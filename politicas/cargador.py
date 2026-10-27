@@ -16,7 +16,7 @@ Compatible con Python 3.9 (lo usará también el controlador Ryu).
 """
 import os
 import sys
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import yaml
 

@@ -219,7 +219,9 @@ def main():
         if f["prueba"] in ("por_adelantado", "telemetria") and f["cumple"] != "-":
             info(f"    {f['cumple']:3s} {f['prueba']}: {f['valor']} ({f['criterio']})\n")
     info(f"\n*** Resultados agregados a {CSV}\n")
+    # Código de salida para el pipeline de CI: 1 si no se midió nada o algo no cumplió.
+    return 0 if filas and all(f["cumple"] != "no" for f in filas) else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

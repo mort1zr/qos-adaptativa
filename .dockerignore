@@ -1,0 +1,15 @@
+# Solo entra a la imagen lo que copia el Dockerfile (controlador/, politicas/, requirements.txt).
+.git
+.venv
+**/__pycache__
+**/*.pyc
+datos/
+experimentos/
+escenarios/
+trafico/
+topologia/
+ia/
+ci/
+*.zip
+*.log
+resultados-pruebas*.xml

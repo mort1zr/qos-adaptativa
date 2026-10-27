@@ -215,14 +215,20 @@ class Telemetria:
             else:
                 continue
             clave = (dpid, p["port_no"])
+            if _contador(p.get("tx_bytes")) is None or _contador(p.get("tx_packets")) is None:
+                # El switch respondió "no disponible" (2^64 - 1): se ignora la lectura y se
+                # conserva la anterior, para no confundirla con billones de Mbps.
+                continue
             previo = self._puertos.get(clave)
             db, dp, seg = self._tasa(self._puertos, clave, p["tx_bytes"], p["tx_packets"], ts, None)
             actual = _contador(p.get("tx_dropped"))
             anterior = self._descartes.get(clave)
             descartes = actual - anterior if actual is not None and anterior is not None else None
             self._descartes[clave] = actual
-            if not previo:
-                continue            # la primera lectura solo sirve de referencia
+            if not previo or p["tx_bytes"] < previo[0]:
+                # La primera lectura (o la de un puerto recreado al rearmar la red) solo
+                # sirve de referencia: no se sabe en cuánto tiempo se juntaron esos bytes.
+                continue
             filas.append({"ts": ts, "sede_id": sw["sede_id"], "sentido": sentido,
                           "mbps": db * 8 / seg / 1e6, "pps": dp / seg,
                           "descartes": max(descartes, 0) if descartes is not None else None,
@@ -349,3 +355,43 @@ def uso_enlaces(db_path: str = DB_DEFECTO, minutos: float = 10,
     return [{"sede_id": s, "sentido": se, "promedio_mbps": round(p or 0, 3), "maximo_mbps": round(mx or 0, 3),
              "capacidad_mbps": c, "uso_pct": round(100 * (p or 0) / c, 1) if c else None,
              "descartes": d} for s, se, p, mx, c, d in filas]
+
+
+# ---------------- panel en vivo (Sprint 3: visualización) ----------------
+def serie_enlaces(db_path: str = DB_DEFECTO, minutos: float = 10, ahora: Optional[float] = None) -> dict:
+    """Uso de cada enlace de acceso en el tiempo: {sede: {sentido: [[ts, mbps], ...]}, ...}
+    con la capacidad de cada sede en '_capacidad'."""
+    ahora = time.time() if ahora is None else ahora
+    con = sqlite3.connect(db_path)
+    try:
+        filas = con.execute("SELECT ts, sede_id, sentido, mbps, capacidad_mbps FROM enlaces "
+                            "WHERE ts >= ? AND ts <= ? ORDER BY ts", (ahora - minutos * 60, ahora)).fetchall()
+    except sqlite3.OperationalError:
+        filas = []
+    con.close()
+    salida: Dict[str, dict] = {}
+    for ts, sede, sentido, mbps, cap in filas:
+        s = salida.setdefault(str(sede), {"subida": [], "bajada": [], "_capacidad": cap})
+        s[sentido].append([round(ts, 1), round(mbps, 3)])
+    return salida
+
+
+def datos_panel(db_path: str = DB_DEFECTO, minutos: float = 5, ahora: Optional[float] = None) -> dict:
+    """Todo lo que muestra el panel: uso de los enlaces, demanda por clase y por área
+    (los dos sentidos sumados) y las decisiones del controlador, de los últimos minutos."""
+    ahora = time.time() if ahora is None else ahora
+    try:
+        clases = demanda(db_path, minutos, ahora=ahora, por="clase")
+        areas = demanda(db_path, minutos, ahora=ahora, por="area")
+        enlaces = uso_enlaces(db_path, minutos, ahora=ahora)
+    except sqlite3.OperationalError:          # base vacía: el controlador aún no guardó nada
+        clases, areas, enlaces = [], [], []
+    por_area: Dict[tuple, float] = {}
+    for f in areas:
+        k = (f["sede_id"], f["sede"], f["area"], f["clase"])
+        por_area[k] = por_area.get(k, 0.0) + f["promedio_mbps"]
+    top_areas = sorted(({"sede_id": k[0], "sede": k[1], "area": k[2], "clase": k[3], "mbps": round(v, 3)}
+                        for k, v in por_area.items() if v >= 0.001), key=lambda x: -x["mbps"])[:12]
+    return {"ahora": ahora, "minutos": minutos, "enlaces": enlaces,
+            "clases": [f for f in clases if f["maximo_mbps"] >= 0.001],
+            "areas": top_areas, "decisiones": resumen_decisiones(db_path, minutos, ahora=ahora)}
