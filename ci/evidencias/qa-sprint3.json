@@ -17,6 +17,16 @@
     },
     "casos": [
       {
+        "id": "QA-00",
+        "nombre": "Laboratorio disponible para QA",
+        "estado": "APROBADO",
+        "segundos": 21.22,
+        "detalle": {
+          "red_inicial": "levantada",
+          "espera_api_tras_limpieza": true
+        }
+      },
+      {
         "id": "QA-01",
         "nombre": "Entorno y rama",
         "estado": "APROBADO",
@@ -45,16 +55,6 @@
               "motivo": "solo con sudo"
             }
           ]
-        }
-      },
-      {
-        "id": "QA-00",
-        "nombre": "Laboratorio disponible para QA",
-        "estado": "APROBADO",
-        "segundos": 21.22,
-        "detalle": {
-          "red_inicial": "levantada",
-          "espera_api_tras_limpieza": true
         }
       },
       {
@@ -93,21 +93,6 @@
           ],
           "sala": 1,
           "clasificador_activado": "destino"
-        }
-      },
-      {
-        "id": "QA-07",
-        "nombre": "Cancelar tráfico y rechazar acciones incompatibles",
-        "estado": "APROBADO",
-        "segundos": 107.95,
-        "detalle": {
-          "cancelacion_s": 21.0,
-          "switches_conectados_al_final": 0,
-          "rechazos_verificados": [
-            "segundo escenario:409",
-            "clasificador durante escenario:409",
-            "sala inválida:400"
-          ]
         }
       },
       {
@@ -183,6 +168,21 @@
         }
       },
       {
+        "id": "QA-07",
+        "nombre": "Cancelar tráfico y rechazar acciones incompatibles",
+        "estado": "APROBADO",
+        "segundos": 107.95,
+        "detalle": {
+          "cancelacion_s": 21.0,
+          "switches_conectados_al_final": 0,
+          "rechazos_verificados": [
+            "segundo escenario:409",
+            "clasificador durante escenario:409",
+            "sala inválida:400"
+          ]
+        }
+      },
+      {
         "id": "QA-08",
         "nombre": "Apagado y segundo arranque de la red",
         "estado": "APROBADO",
@@ -191,6 +191,14 @@
           "arranques_red": 2,
           "switches_conectados": 44,
           "alcance": "Segundo arranque de la red sin reiniciar Ubuntu ni el orquestador."
+        }
+      },
+      {
+        "id": "QA-09",
+        "nombre": "Reinicio de Ubuntu y del proceso del orquestador",
+        "estado": "NO_EJECUTADO",
+        "detalle": {
+          "motivo": "Requiere cierre y apertura de la sesión; no se acredita con reiniciar Docker"
         }
       },
       {
@@ -208,15 +216,21 @@
         "detalle": {
           "archivos_verificados": 21
         }
-      },
-      {
-        "id": "QA-09",
-        "nombre": "Reinicio de Ubuntu y del proceso del orquestador",
-        "estado": "NO_EJECUTADO",
-        "detalle": {
-          "motivo": "Requiere cierre y apertura de la sesión; no se acredita con reiniciar Docker"
-        }
       }
+    ],
+    "orden_ejecucion": [
+      "QA-01",
+      "QA-02",
+      "QA-00",
+      "QA-03",
+      "QA-04",
+      "QA-05",
+      "QA-07",
+      "QA-06",
+      "QA-08",
+      "QA-REST",
+      "QA-HASH",
+      "QA-09"
     ]
   },
   "objetivos_de_servicio": [
