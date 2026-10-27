@@ -89,11 +89,14 @@ def comandos_evidencia(tipo, sala):
 
 
 class Demo:
-    def __init__(self, raiz=RAIZ, ejecutar=subprocess.run, lanzar=subprocess.Popen, vista_previa=False, api_url="http://127.0.0.1:8080"):
+    def __init__(self, raiz=RAIZ, ejecutar=subprocess.run, lanzar=subprocess.Popen, vista_previa=False,
+                 api_url="http://127.0.0.1:8080", controlador=None):
         self.api_url = api_url
         self.raiz, self.ejecutar, self.lanzar = Path(raiz).resolve(), ejecutar, lanzar
         self.vista_previa = vista_previa
         self.cfg = yaml.safe_load((self.raiz / "demo/demo.yaml").read_text())
+        if controlador is not None:
+            self.cfg["controlador"] = controlador
         if self.cfg["controlador"] not in {"lab", "venv", "docker"} or self.cfg["datapath"] not in {"kernel", "user"}:
             raise ValueError("Revisa controlador y datapath en demo/demo.yaml")
         salida = (self.raiz / self.cfg["resultados_demo"]).resolve()
@@ -496,10 +499,12 @@ def crear_handler(demo):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--vista-previa", action="store_true", help="solo interfaz, sin acciones ni privilegios")
+    p.add_argument("--controlador", choices=("lab", "venv", "docker"),
+                   help="usar este modo sin modificar demo.yaml")
     args = p.parse_args()
     if os.geteuid() != 0 and not args.vista_previa:
         sys.exit("Inicia con sudo python3 demo/orquestador.py, o usa --vista-previa para revisar la interfaz.")
-    demo = Demo(vista_previa=args.vista_previa)
+    demo = Demo(vista_previa=args.vista_previa, controlador=args.controlador)
     servidor = ThreadingHTTPServer(("127.0.0.1", 8090), crear_handler(demo))
 
     def detener(*_):

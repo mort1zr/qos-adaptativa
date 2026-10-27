@@ -30,6 +30,8 @@ Verifica también los módulos del kernel de la especificación.
    - `docker`: usa `docker compose up -d` en esta copia del proyecto.
    - `venv`: usa `.venv/bin/ryu-manager` como tu usuario normal, mediante sudo.
 2. No dejes otra topología ni otro controlador ocupando los puertos del laboratorio.
+   Para elegir Docker sin modificar la configuración guardada, también puedes
+   iniciar con `sudo python3 demo/orquestador.py --controlador docker`.
 3. Ejecuta `demo/iniciar_demo.sh`. Pide sudo una vez y abre la consola.
 4. Inicia el controlador, levanta la red y explora la topología y las evidencias.
 5. Ejecuta un escenario o compara dos estrategias. El escenario sustituye a la

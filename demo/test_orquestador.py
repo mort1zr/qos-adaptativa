@@ -78,6 +78,13 @@ class Acciones(unittest.TestCase):
         self.assertEqual(cmd[:3], ["sudo", "-u", "alumno"])
         self.assertIn("127.0.0.1", cmd)
 
+    def test_modo_local_no_modifica_configuracion(self):
+        ruta = self.raiz / "demo/demo.yaml"
+        original = ruta.read_bytes()
+        demo = Demo(self.raiz, controlador="docker")
+        self.assertEqual(demo.cfg["controlador"], "docker")
+        self.assertEqual(ruta.read_bytes(), original)
+
     def test_evidencias_validacion_y_timeout(self):
         self.demo.trabajo = {"tipo": "red", "estado": "corriendo"}
         self.demo.red_lista = True
