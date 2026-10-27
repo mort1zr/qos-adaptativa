@@ -461,6 +461,8 @@ def main():
     p.add_argument("--semilla", type=int, default=7)
     p.add_argument("--ruido", type=float, default=0.0, help="variación aleatoria de las intensidades (0.1 = ±10 %%)")
     p.add_argument("--escala", type=float, default=1.0, help="multiplica la duración de las fases (pruebas rápidas)")
+    p.add_argument("--salida", help="CSV separado para la demo; conserva la salida habitual si se omite")
+    p.add_argument("--progreso", help="publicar fases en un archivo JSON")
     p.add_argument("--listar", action="store_true")
     p.add_argument("--plan", action="store_true", help="muestra las fases e intensidades sin levantar la red")
     p.add_argument("--datapath", choices=("kernel", "user"), default="kernel")
@@ -500,19 +502,46 @@ def main():
     if os.geteuid() != 0:
         sys.exit("Ejecuta con sudo (levanta la red de Mininet)")
     filas, contexto = [], []
+    salida = os.path.abspath(args.salida) if args.salida else CSV
+    ruta_contexto = os.path.splitext(salida)[0] + "_contexto.csv" if args.salida else CONTEXTO
+    progreso = None
+    if args.progreso:
+        from escenarios.progreso import Progreso
+        progreso = Progreso(args.progreso)
+        from politicas.cargador import cargar
+        o = cargar().objetivos
+        progreso.iniciar(datos, planes, estrategias,
+                         {"escenarios": nombres, "estrategias": estrategias, "sala": args.sala,
+                          "semilla": args.semilla, "escala": args.escala},
+                         {"voz_lat95_ms": o["latencia_p95_ms"], "voz_mos": o["mos_min"],
+                          **datos.get("objetivos", {})})
 
     def guardar_escenario(f, c):
         filas.extend(f)
         contexto.extend(c)
+    if progreso:
+        import signal
+
+        def detener_demo(signum, frame):
+            raise KeyboardInterrupt("Demo cancelada")
+
+        signal.signal(signal.SIGTERM, detener_demo)
     try:
         ejecutar(datos, perfiles, nombres, estrategias, args.sala, args.semilla, args.ruido, args.escala,
-                 args.datapath, al_terminar=guardar_escenario)
+                 args.datapath, al_terminar=guardar_escenario, progreso=progreso)
+    except BaseException as exc:
+        if progreso:
+            progreso.finalizar("cancelado" if isinstance(exc, KeyboardInterrupt) else "fallido", str(exc))
+        raise
+    else:
+        if progreso:
+            progreso.finalizar()
     finally:
-        guardar_csv(CSV, filas)
-        guardar_csv(CONTEXTO, contexto)
+        guardar_csv(salida, filas)
+        guardar_csv(ruta_contexto, contexto)
     imprimir(filas)
     imprimir_objetivos(datos)
-    print(f"*** Resultados agregados a {CSV}\n*** Contexto de cada fase (para la IA) en {CONTEXTO}")
+    print(f"*** Resultados agregados a {salida}\n*** Contexto de cada fase (para la IA) en {ruta_contexto}")
 
 
 def imprimir_objetivos(datos):
@@ -525,7 +554,7 @@ def imprimir_objetivos(datos):
 
 
 def ejecutar(datos, perfiles, nombres, estrategias, sala, semilla=7, ruido=0.0, escala=1.0, datapath="kernel",
-             al_terminar=None, extra=None):
+             al_terminar=None, extra=None, progreso=None):
     """Levanta la red, corre los escenarios 'nombres' con cada estrategia en la sala y la
     apaga. Al terminar cada escenario llama a al_terminar(filas, contexto) con sus filas
     (así una corrida larga guarda lo hecho aunque después se interrumpa). 'extra' son
@@ -543,8 +572,6 @@ def ejecutar(datos, perfiles, nombres, estrategias, sala, semilla=7, ruido=0.0, 
     with open(CONFIG_DEFECTO) as f:
         cfg = yaml.safe_load(f)
     emp = EmpresaXYZ(cfg, datapath=datapath)
-    emp.construir()
-    emp.net.start()
     fecha = datetime.datetime.now().isoformat(timespec="seconds")
     objetivo_pagos = datos.get("objetivos", {}).get("pagos_p95_ms", 500)
     from controlador.telemetria import leer_config
@@ -552,6 +579,8 @@ def ejecutar(datos, perfiles, nombres, estrategias, sala, semilla=7, ruido=0.0, 
     telemetria = (cfg_tel["base_datos"], cfg_tel["intervalo_s"])
     gen = operador = motor = None
     try:
+        emp.construir()
+        emp.net.start()
         emp.configurar(estrategia=ESTRATEGIAS[estrategias[0]])
         operador = Operador.de_empresa(emp, avisar=lambda t: info(t + "\n"))
         info("*** Esperando 8 s a que los switches se conecten a Ryu\n")
@@ -586,6 +615,8 @@ def ejecutar(datos, perfiles, nombres, estrategias, sala, semilla=7, ruido=0.0, 
                 filas, contexto = [], []
                 for fase in planes[nombre]:
                     info(f"    fase {fase['nombre']} ({fase['duracion_s']} s, {reloj.describir()})\n")
+                    if progreso:
+                        progreso.empezar_fase(nombre, estrategia, fase["nombre"], reloj.describir())
                     franja_ini = motor.actual if motor else None
                     fila, t0, t1 = correr_fase(emp, gen, sala, fase, sondas_de(datos, nombre), m,
                                                reloj, nombre, estrategia, telemetria=telemetria,
@@ -597,6 +628,8 @@ def ejecutar(datos, perfiles, nombres, estrategias, sala, semilla=7, ruido=0.0, 
                         ok = (fila["pagos_n"] > 0 and fila["pagos_errores"] == 0
                               and fila["pagos_p95_ms"] is not None and fila["pagos_p95_ms"] <= objetivo_pagos)
                         fila["cumple_pagos"] = "sí" if ok else "no"
+                    if progreso:
+                        progreso.terminar_fase(nombre, estrategia, fase["nombre"], fila)
                     filas.append({**extra, "fecha": fecha, "escenario": nombre, "estrategia": estrategia,
                                   "sala": sala, "semilla": semilla, "ruido": ruido, **fila})
                     contexto.append({**extra, "inicio_real": round(t0, 3), "fin_real": round(t1, 3),
