@@ -69,6 +69,7 @@ from controlador.inventario import Inventario  # noqa: E402
 from controlador.telemetria import (Telemetria, datos_panel, leer_config, percentil,  # noqa: E402
                                     serie_enlaces)
 from politicas.cargador import cargar  # noqa: E402
+from controlador.topologia import leer_topologia, leer_progreso  # noqa: E402
 
 COOKIE_FLUJO = 0x16          # reglas por flujo de esta aplicación (las de prueba de PCIII-15 usan 0x15)
 COOKIE_PROACTIVA = 0x20      # reglas por adelantado (PCIII-20)
@@ -293,6 +294,8 @@ class QoSApp(app_manager.RyuApp):
     def estado(self):
         ms = list(self._ms)
         return {
+            "switches_conectados": sorted(self.inv.switch(d)["nombre"] for d in self.datapaths if self.inv.switch(d)),
+            "total_switches": len(self.inv.por_dpid),
             "clasificador": self.clasificador.nombre,
             "clasificadores": {n: c.descripcion for n, c in CLASIFICADORES.items()},
             "switches_acceso": sorted(self.inv.switch(d)["nombre"] for d in self.datapaths
@@ -398,6 +401,16 @@ class QoSRest(ControllerBase):
     @route("qos", "/qos/estado", methods=["GET"])
     def estado(self, req, **kwargs):
         return _json(self.app.estado())
+
+    @route("qos", "/qos/topologia", methods=["GET"])
+    def topologia(self, req, **kwargs):
+        self.app.inv.recargar()
+        nombres = self.app.estado()["switches_conectados"]
+        return _json(leer_topologia(*self.app.inv.rutas, nombres))
+
+    @route("qos", "/qos/progreso", methods=["GET"])
+    def progreso(self, req, **kwargs):
+        return _json(leer_progreso(os.path.join(RAIZ, "datos")))
 
     @route("qos", "/qos/telemetria", methods=["GET"])
     def telemetria(self, req, **kwargs):

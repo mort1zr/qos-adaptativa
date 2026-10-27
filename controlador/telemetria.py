@@ -391,7 +391,7 @@ def datos_panel(db_path: str = DB_DEFECTO, minutos: float = 5, ahora: Optional[f
         k = (f["sede_id"], f["sede"], f["area"], f["clase"])
         por_area[k] = por_area.get(k, 0.0) + f["promedio_mbps"]
     top_areas = sorted(({"sede_id": k[0], "sede": k[1], "area": k[2], "clase": k[3], "mbps": round(v, 3)}
-                        for k, v in por_area.items() if v >= 0.001), key=lambda x: -x["mbps"])[:12]
+                        for k, v in por_area.items() if v >= 0.001), key=lambda x: -x["mbps"])
     return {"ahora": ahora, "minutos": minutos, "enlaces": enlaces,
             "clases": [f for f in clases if f["maximo_mbps"] >= 0.001],
-            "areas": top_areas, "decisiones": resumen_decisiones(db_path, minutos, ahora=ahora)}
+            "areas": top_areas[:12], "areas_completas": top_areas, "decisiones": resumen_decisiones(db_path, minutos, ahora=ahora)}
