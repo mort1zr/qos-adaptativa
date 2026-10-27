@@ -83,10 +83,13 @@ No reemplazan la lista manual 6.2 de `docs/ESPECIFICACION_DEMO.md`.
   espera de sondas y telemetría. No se garantiza el tiempo del guion sin medirlo
   en la VM real.
 
-## Validación pendiente en el laboratorio
+## Validación realizada en el laboratorio
 
-En el entorno de desarrollo faltan Mininet, OVS, Docker y Ryu, y sudo requiere una
-contraseña interactiva que no está disponible para esta ejecución. Por ello no se ha verificado aquí el arranque real,
-44 switches conectados, contadores HTB, recuperación tras una cancelación con
-procesos reales ni la comparación de calidad de voz. Ningún resultado de ejemplo
-se presenta como medición real. Usa la lista 6.2 antes de presentar la demo.
+Se construyó y arrancó el controlador Docker, se conectaron los 44 switches y
+se ejecutaron escenarios con tráfico real. La comparación de respaldo tuvo seis
+fases válidas; una fase de recuperación de otra corrida fue inválida por CPU
+alta y se conservó como tal. Los detalles, resultados y límites están en
+[../docs/VALIDACION_LOCAL.md](../docs/VALIDACION_LOCAL.md).
+
+Siguen pendientes los casos indicados en ese documento y la ejecución de CI/CD
+en Azure DevOps. La lista completa 6.2 no se declara aprobada.
