@@ -5,13 +5,14 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 import yaml
 
 from escenarios.escenario import (ESCENARIOS, ESTRATEGIAS, EscenarioInvalido, cargar_escenarios,
                                   cpu_pct, evaluar_udp, goodput_masivo, guardar_csv, metricas_telemetria,
                                   plan_escenario, validez,
-                                  poner_estrategia, sondas_de)
+                                  esperar_controlador, poner_estrategia, sondas_de)
 from escenarios.reloj import RelojSimulado, leer_reloj
 
 
@@ -24,6 +25,27 @@ def cargar_desde(datos):
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
         yaml.safe_dump(datos, f, allow_unicode=True)
     return cargar_escenarios(f.name)
+
+
+class ArranqueControlador(unittest.TestCase):
+    def test_controlador_listo_no_espera(self):
+        with patch('escenarios.escenario.time.sleep') as dormir:
+            self.assertTrue(esperar_controlador(lambda: True))
+        dormir.assert_not_called()
+
+    def test_reintenta_si_ryu_se_esta_recuperando(self):
+        disponible = Mock(side_effect=[False, False, True])
+        with patch('escenarios.escenario.time.monotonic', side_effect=[0, 0, 0.5]), \
+                patch('escenarios.escenario.time.sleep') as dormir:
+            self.assertTrue(esperar_controlador(disponible))
+        self.assertEqual(disponible.call_count, 3)
+        self.assertEqual(dormir.call_count, 2)
+
+    def test_fallo_persistente_respeta_limite(self):
+        with patch('escenarios.escenario.time.monotonic', side_effect=[0, 29.8, 30]), \
+                patch('escenarios.escenario.time.sleep') as dormir:
+            self.assertFalse(esperar_controlador(lambda: False))
+        self.assertAlmostEqual(dormir.call_args.args[0], 0.2)
 
 
 class Escenarios(unittest.TestCase):

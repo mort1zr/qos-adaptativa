@@ -553,6 +553,18 @@ def imprimir_objetivos(datos):
           f"la voz, sin MOS); web p95 <= {o.get('web_p95_ms', 3000) / 1000:g} s.")
 
 
+def esperar_controlador(disponible, timeout_s=30):
+    """Espera la recuperación de Ryu sin confundir un reinicio con un fallo definitivo."""
+    limite = time.monotonic() + timeout_s
+    while True:
+        if disponible():
+            return True
+        restante = limite - time.monotonic()
+        if restante <= 0:
+            return False
+        time.sleep(min(0.5, restante))
+
+
 def ejecutar(datos, perfiles, nombres, estrategias, sala, semilla=7, ruido=0.0, escala=1.0, datapath="kernel",
              al_terminar=None, extra=None, progreso=None):
     """Levanta la red, corre los escenarios 'nombres' con cada estrategia en la sala y la
@@ -562,9 +574,10 @@ def ejecutar(datos, perfiles, nombres, estrategias, sala, semilla=7, ruido=0.0, 
     from mininet.log import info, setLogLevel
     from empresa_xyz import AVISO_RYU, CONFIG_DEFECTO, EmpresaXYZ, controlador_activo
     import medicion as m
-    if not controlador_activo():
+    info("*** Esperando disponibilidad del controlador (hasta 30 s)\n")
+    if not esperar_controlador(controlador_activo):
         raise RuntimeError(AVISO_RYU.format(ip="127.0.0.1", puerto=6633))
-    if any(CLASIFICADOR[e] != "ninguno" for e in estrategias) and not api.disponible():
+    if any(CLASIFICADOR[e] != "ninguno" for e in estrategias) and not esperar_controlador(api.disponible):
         raise RuntimeError(api.AVISO.format(url=api.URL))
     extra = extra or {}
     planes = {n: plan_escenario(datos, n, semilla, ruido, escala) for n in nombres}
