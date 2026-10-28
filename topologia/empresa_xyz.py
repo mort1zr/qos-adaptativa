@@ -27,6 +27,8 @@ import argparse
 import csv
 import os
 import socket
+import signal
+import threading
 import subprocess
 import sys
 from collections import OrderedDict
@@ -407,6 +409,7 @@ def main():
     p = argparse.ArgumentParser(description="Topología de la Empresa XYZ")
     p.add_argument("--config", default=CONFIG_DEFECTO)
     p.add_argument("--verificar", action="store_true", help="ping a todos los equipos al iniciar")
+    p.add_argument("--esperar", action="store_true", help="mantener la red hasta recibir una señal")
     p.add_argument("--sin-cli", action="store_true", help="no abrir la consola de Mininet")
     p.add_argument("--sin-controlador", action="store_true",
                    help="switches autónomos (sin Ryu), útil para depurar")
@@ -440,19 +443,29 @@ def main():
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
+    if args.esperar:
+        def detener_antes_de_esperar(*_):
+            raise KeyboardInterrupt("Red cancelada")
+        signal.signal(signal.SIGTERM, detener_antes_de_esperar)
     setLogLevel("info")
     emp = EmpresaXYZ(cfg, controlador=not args.sin_controlador,
                      ip_ctrl=args.ip_controlador, puerto_ctrl=args.puerto_controlador,
                      datapath=args.datapath)
-    emp.construir()
-    emp.net.start()
     try:
+        emp.construir()
+        emp.net.start()
         emp.configurar(firewall=args.firewall, estrategia=args.estrategia,
                        burst_ms=args.burst_ms, hoja=args.cola_hoja)
         emp.resumen()
         if args.verificar:
             emp.verificar()
-        if not args.sin_cli:
+        if args.esperar:
+            fin = threading.Event()
+            signal.signal(signal.SIGTERM, lambda *_: fin.set())
+            signal.signal(signal.SIGINT, lambda *_: fin.set())
+            info("*** Red lista\n")
+            fin.wait()
+        elif not args.sin_cli:
             info("*** Aviso: no uses 'pingall' (son ~280 equipos); usa --verificar\n")
             CLI(emp.net)
     finally:

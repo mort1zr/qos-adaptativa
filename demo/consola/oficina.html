@@ -1,0 +1,909 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Oficina virtual · QoS adaptativa</title>
+<style>
+:root{color-scheme:dark;--fondo:#0b1320;--panel:#131f30;--borde:#2b3a4d;--texto:#ecf2f8;--suave:#a6b5c8;
+ --verde:#52d7ac;--rojo:#ff8991;--ambar:#ffc76e;
+ --sem-verde:#5fd37a;--sem-ambar:#ffcc55;--sem-rojo:#f2585b;
+ --tiempo_real:#64baff;--critico:#f8bf63;--negocio:#52d7ac;--vigilancia:#aa9aff;--masivo:#9baec6;--restringido:#ff8991}
+*{box-sizing:border-box}
+body{margin:0;background:var(--fondo);color:var(--texto);font:14px/1.5 system-ui,sans-serif}
+.envoltura{display:grid;grid-template-columns:auto 326px;gap:16px;padding:16px;align-items:start;max-width:1152px}
+h1{font-size:19px;margin:0}
+h2{font-size:12px;margin:0 0 8px;text-transform:uppercase;letter-spacing:1.3px;color:var(--suave)}
+.marca{text-transform:uppercase;letter-spacing:2px;color:var(--verde);font-size:10px;font-weight:700}
+.escena{position:relative;width:768px;max-width:100%;border:1px solid var(--borde);border-radius:10px;margin-top:8px}
+canvas{display:block;width:100%;height:auto;image-rendering:pixelated;cursor:pointer;border-radius:9px}
+.rotulo{position:absolute;transform:translate(-50%,0);font:700 9px/1 system-ui,sans-serif;letter-spacing:.6px;
+ color:#f7ecd5;background:rgba(14,10,24,.72);border-radius:3px;padding:2px 5px;pointer-events:none;
+ white-space:nowrap;text-transform:uppercase}
+.globo{position:absolute;transform:translate(-50%,-118%);font:11px/1.3 system-ui,sans-serif;color:#f7ecd5;
+ background:rgba(14,10,24,.92);border:1px solid rgba(247,236,213,.28);border-radius:5px;padding:4px 7px;
+ pointer-events:none;white-space:nowrap;display:none;z-index:3}
+.menu{position:absolute;z-index:5;width:226px;background:#16213a;border:1px solid #46618c;border-radius:9px;
+ padding:9px 10px;box-shadow:0 10px 26px rgba(0,0,0,.55);display:none}
+.menu::after{content:'';position:absolute;left:var(--flecha,50%);margin-left:-6px;border:6px solid transparent;
+ border-top-color:#46618c;bottom:-12px}
+.menu.abajo::after{bottom:auto;top:-12px;border-top-color:transparent;border-bottom-color:#46618c}
+.menu h3{margin:0 0 2px;font-size:13px}
+.menu .zona{font-size:10px;color:var(--suave);text-transform:uppercase;letter-spacing:.8px;margin-bottom:7px}
+.menu .cerrar{position:absolute;top:5px;right:7px;background:none;border:0;color:var(--suave);font-size:15px;
+ padding:0 3px;line-height:1;cursor:pointer}
+.menu label{display:flex;gap:7px;align-items:flex-start;padding:5px 0;border-top:1px solid #27374f;font-size:12px}
+.menu label:hover{color:#fff}
+.menu input{margin-top:2px}
+.menu small{display:block;color:var(--suave);font-size:10px;line-height:1.4}
+.tarjeta{background:var(--panel);border:1px solid var(--borde);border-radius:10px;padding:12px;margin-bottom:12px}
+button,select{font:inherit;color:var(--texto);background:#1d2d43;border:1px solid #3c4f68;border-radius:7px;padding:6px 10px}
+button{cursor:pointer}button:hover{border-color:var(--verde)}
+button[aria-pressed=true]{background:var(--verde);color:#08251d;border-color:var(--verde);font-weight:700}
+.fila{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+select{width:100%;font-size:12px;padding:5px 8px;margin-top:8px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:4px 3px;border-bottom:1px solid var(--borde);white-space:nowrap}
+th{color:var(--suave);font-weight:500;font-size:11px}
+td.n{text-align:right;font-variant-numeric:tabular-nums}
+.punto{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:5px}
+.sem{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.medidor{margin:7px 0}
+.medidor .barra{height:9px;border-radius:5px;background:#0d1626;overflow:hidden;border:1px solid var(--borde)}
+.medidor .barra i{display:block;height:100%;transition:width .25s}
+.medidor .pie{display:flex;justify-content:space-between;font-size:10px;color:var(--suave);margin-top:2px}
+.lista{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:0 18px;align-content:start}
+.mini{height:5px;border-radius:3px;background:#0d1626;overflow:hidden;margin-top:3px;width:100%}
+.mini i{display:block;height:100%}
+.enc{padding:7px 0;border-bottom:1px solid var(--borde)}
+.enc .cab{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.enc .cifra{font-size:11px;color:var(--suave);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ok{color:var(--verde)}.mal{color:var(--rojo)}.aviso{color:var(--ambar)}
+.nota{font-size:11px;color:var(--suave);line-height:1.55}
+.leyenda{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--suave);margin-top:8px}
+.vacio{color:var(--suave);font-size:12px}
+@media(max-width:1100px){.envoltura{grid-template-columns:1fr}.escena{width:100%}}
+</style>
+
+<div class="envoltura">
+  <div>
+    <div class="marca">Laboratorio SDN · Empresa XYZ</div>
+    <h1>Oficina virtual · Sala 1</h1>
+    <div class="escena" id="escena">
+      <canvas id="plano" width="384" height="256" role="img"
+              aria-label="Plano de la sala por ambientes; con el foco aquí, las flechas recorren los equipos"></canvas>
+      <div class="globo" id="globo"></div>
+      <div class="menu" id="menu"></div>
+    </div>
+    <div class="leyenda">
+      <span><span class="sem" style="background:var(--sem-verde)"></span><b>Holgado</b> · recibe todo el ancho de banda que pide</span>
+      <span><span class="sem" style="background:var(--sem-ambar)"></span><b>Apretado</b> · recibe entre la mitad y casi todo</span>
+      <span><span class="sem" style="background:var(--sem-rojo)"></span><b>Ahogado</b> · recibe menos de la mitad</span>
+    </div>
+    <p class="nota" style="margin:8px 0 0">
+      Cada punto que recorre un cable es tráfico de ese equipo. <b>Cuántos puntos hay</b> dice los Mbps
+      que está llevando ese flujo; <b>a qué velocidad avanzan</b> dice cuánto esperan en la cola del switch,
+      que es la latencia. Cuando el enlace se llena, las clases con prioridad siguen corriendo igual de
+      rápido y las demás se arrastran.
+    </p>
+
+    <div class="tarjeta" style="margin-top:14px">
+      <h2>Actividades encendidas</h2>
+      <div class="lista" id="encendidas"><p class="vacio">Nada encendido todavía.</p></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="tarjeta">
+      <h2>Control del enlace</h2>
+      <div class="fila">
+        <button id="qos-si" aria-pressed="true">QoS activada</button>
+        <button id="qos-no" aria-pressed="false">Sin QoS</button>
+        <button id="vaciar">Vaciar</button>
+      </div>
+      <p class="nota" id="nota-qos"></p>
+      <div class="fila" id="presets"></div>
+      <div class="fila" style="margin-top:9px">
+        <button id="pausa">⏸ Pausar</button>
+        <button id="factor" title="Velocidad del reloj simulado">×6</button>
+        <span class="nota" id="reloj"></span>
+      </div>
+    </div>
+
+    <div class="tarjeta">
+      <h2>Enlace de acceso · 30 Mbps en cada sentido</h2>
+      <div class="medidor" id="m-bajada"></div>
+      <div class="medidor" id="m-subida"></div>
+      <div class="fila" style="margin:10px 0 6px">
+        <button id="dir-bajada" aria-pressed="true">↓ Bajada</button>
+        <button id="dir-subida" aria-pressed="false">↑ Subida</button>
+      </div>
+      <table>
+        <thead><tr><th>Clase</th><th class="n">Pide</th><th class="n">Recibe</th><th>Servido</th></tr></thead>
+        <tbody id="tabla-clases"></tbody>
+      </table>
+      <p class="nota" id="nota-saturacion"></p>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const SEDE = {nombre: 'Sala 1', mbps: 30};
+const BASE_W = 384, BASE_H = 256;
+
+const CLASES = [
+  {n:'tiempo_real', etiqueta:'Tiempo real', cola:1, prio:0, gar:15, techo:40},
+  {n:'critico',     etiqueta:'Crítico',     cola:2, prio:1, gar:15, techo:100},
+  {n:'negocio',     etiqueta:'Negocio',     cola:3, prio:2, gar:25, techo:100},
+  {n:'vigilancia',  etiqueta:'Vigilancia',  cola:4, prio:3, gar:10, techo:50},
+  {n:'masivo',      etiqueta:'Masivo',      cola:0, prio:4, gar:10, techo:100},
+  {n:'restringido', etiqueta:'Restringido', cola:5, prio:5, gar:2,  techo:20},
+];
+const COLOR = c => getComputedStyle(document.documentElement).getPropertyValue('--' + c).trim() || '#9baec6';
+const SEMAFORO = {
+  verde: {claro:'#8ff0a2', medio:'#5fd37a', oscuro:'#2f8f4c'},
+  ambar: {claro:'#ffe49a', medio:'#ffcc55', oscuro:'#b8862a'},
+  rojo:  {claro:'#ff9b9d', medio:'#f2585b', oscuro:'#a32b2e'},
+};
+
+const ACTIVIDADES = {
+  voip:        {etiqueta:'Llamada telefónica', clase:'tiempo_real', bajada:0.0808, subida:0.0808, destino:'central de la oficina', vari:0},
+  videollamada:{etiqueta:'Videollamada HD',    clase:'tiempo_real', bajada:2.5,    subida:1.5,    destino:'inetvc', vari:0.15},
+  reporte:     {etiqueta:'Reporte de las máquinas', clase:'critico', bajada:0.012, subida:0.048,  destino:'servidor de gestión'},
+  pago:        {etiqueta:'Cobro con tarjeta',  clase:'critico',     bajada:0.0006, subida:0.0003, destino:'procesadora de pagos', dur:2, gap:38},
+  sorteo:      {etiqueta:'Sorteo en curso',    clase:'critico',     bajada:0.0024, subida:0.0032, destino:'servidor de gestión'},
+  musica:      {etiqueta:'Música de la sala',  clase:'negocio',     bajada:1.0,    subida:0.0012, destino:'streaming', vari:0.2},
+  camara:      {etiqueta:'Cámara vista en remoto', clase:'vigilancia', bajada:0,   subida:1.5,    destino:'monitoreo de la oficina', vari:0.2},
+  archivos:    {etiqueta:'Enviar archivos a la oficina', clase:'negocio', bajada:0.05, subida:1.2, destino:'servidor de archivos', dur:20, gap:40},
+  navegacion:  {etiqueta:'Navegación web',     clase:'masivo',      bajada:0.1,    subida:0.004,  destino:'inetweb', dur:5, gap:7},
+  descarga:    {etiqueta:'Descarga grande',    clase:'masivo',      bajada:Infinity, subida:0,    destino:'inetupd', elastica:true},
+  respaldo:    {etiqueta:'Respaldo del servidor', clase:'masivo',   bajada:0,      subida:Infinity, destino:'servidor de respaldo', elastica:true},
+  cli_video:   {etiqueta:'Ver videos',         clase:'restringido', bajada:2.0,    subida:0.0012, destino:'streaming', vari:0.25, dur:25, gap:7},
+  cli_social:  {etiqueta:'Redes sociales',     clase:'restringido', bajada:0.6,    subida:0.15,   destino:'inetweb', dur:12, gap:10},
+  cli_llamada: {etiqueta:'Videollamada del cliente', clase:'restringido', bajada:2.5, subida:1.5, destino:'inetvc', dur:55, gap:20,
+                nota:'Gana la regla de segmento: el WiFi de clientes es restringido aunque sea una videollamada.'},
+  cli_descarga:{etiqueta:'Descarga en el móvil', clase:'restringido', bajada:Infinity, subida:0,  destino:'inetupd', elastica:true},
+  per_llamada: {etiqueta:'Llamada por WiFi',   clase:'tiempo_real', bajada:0.0808, subida:0.0808, destino:'central de la oficina', vari:0,
+                nota:'Mismo servicio que el cliente, pero este equipo no está en el WiFi de clientes: gana la regla de llamadas.'},
+  per_video:   {etiqueta:'Ver videos',         clase:'restringido', bajada:1.2,    subida:0.001,  destino:'streaming', vari:0.25, dur:20, gap:9},
+};
+const FACTORES = [1, 2, 4, 6];
+let factor = 6;
+const VARIACION = 0.3;
+
+const PUERTA = {x: 184, y: 22};
+const SW = {x: 184, y: 32};
+const PASILLO = 184;
+
+const SALAS = {
+  maquinas: {nombre:'Sala de máquinas', x:4,   y:26,  w:164, h:124, piso:'casino',  puerta:{lado:'der', y:118}},
+  wifi:     {nombre:'Lounge de clientes', x:4, y:154, w:164, h:98,  piso:'madera',  puerta:{lado:'der', y:186}},
+  camaras:  {nombre:'Monitoreo', x:200, y:26,  w:180, h:82,  piso:'frio',    puerta:{lado:'izq', y:70}},
+  caja:     {nombre:'Caja y pagos', x:200, y:112, w:180, h:62, piso:'damero',  puerta:{lado:'izq', y:140}},
+  admin:    {nombre:'Administración', x:200, y:178, w:180, h:74, piso:'oficina', puerta:{lado:'izq', y:212}},
+};
+for (const s of Object.values(SALAS)) {
+  s.ancla = s.puerta.lado === 'der' ? [s.x + s.w, s.puerta.y] : [s.x, s.puerta.y];
+}
+
+function construirEquipos() {
+  const eq = [];
+  const pon = o => eq.push(o);
+  for (let f = 0; f < 3; f++) {
+    for (let i = 0; i < 10; i++) {
+      pon({id:`maq${f}${i}`, tipo:'tragamonedas', etiqueta:`Tragamonedas ${f * 10 + i + 1}`, zona:'maquinas',
+           x:12 + i * 15, y:36 + f * 28, w:13, h:20, acts:[], agregado:true});
+    }
+  }
+  pon({id:'derby', tipo:'derby', etiqueta:'Derby', zona:'maquinas', x:14, y:122, w:34, h:20, acts:[], agregado:true});
+  pon({id:'ruleta', tipo:'ruleta', etiqueta:'Ruleta', zona:'maquinas', x:56, y:122, w:24, h:20, acts:[], agregado:true});
+  pon({id:'srv', tipo:'rack', etiqueta:'Servidor de sala', zona:'maquinas', x:132, y:118, w:18, h:26, acts:['reporte','respaldo','archivos']});
+
+  for (let i = 0; i < 24; i++) {
+    pon({id:`cam${i}`, tipo:'camara', etiqueta:`Cámara ${i + 1}`, zona:'camaras',
+         x:208 + (i % 12) * 14, y:38 + Math.floor(i / 12) * 18, w:11, h:10, acts:[], agregado:true});
+  }
+  pon({id:'nvr', tipo:'nvr', etiqueta:'Grabador NVR', zona:'camaras', x:292, y:80, w:22, h:14, acts:['camara','camara2']});
+
+  pon({id:'caja', tipo:'pc', etiqueta:'PC de caja', zona:'caja', x:212, y:124, w:18, h:16, acts:['videollamada','descarga','navegacion']});
+  pon({id:'pos1', tipo:'pos', etiqueta:'Terminal de pago 1', zona:'caja', x:240, y:126, w:10, h:14, acts:['pago']});
+  pon({id:'pos2', tipo:'pos', etiqueta:'Terminal de pago 2', zona:'caja', x:256, y:126, w:10, h:14, acts:['pago']});
+  pon({id:'musica', tipo:'pc', etiqueta:'PC de música', zona:'admin', x:212, y:192, w:18, h:16, acts:['musica']});
+  pon({id:'sorteos', tipo:'pc', etiqueta:'PC de sorteos', zona:'admin', x:238, y:192, w:18, h:16, acts:['sorteo']});
+  pon({id:'tel', tipo:'telefono', etiqueta:'Teléfono IP', zona:'admin', x:264, y:194, w:12, h:14, acts:['voip']});
+  pon({id:'imp', tipo:'impresora', etiqueta:'Impresora', zona:'admin', x:284, y:195, w:16, h:13, acts:[], local:true});
+  pon({id:'bio', tipo:'biometrico', etiqueta:'Biométrico', zona:'admin', x:306, y:194, w:8, h:14, acts:[], local:true});
+  pon({id:'cel1', tipo:'celular', etiqueta:'Celular del personal 1', zona:'admin', x:332, y:194, w:8, h:14,
+       acts:['navegacion','per_video','per_llamada']});
+  pon({id:'cel2', tipo:'celular', etiqueta:'Celular del personal 2', zona:'admin', x:346, y:194, w:8, h:14,
+       acts:['navegacion','per_video','per_llamada']});
+
+  for (let i = 0; i < 6; i++) {
+    pon({id:`cli${i}`, tipo:'cliente', etiqueta:`Grupo de clientes ${i + 1}`, zona:'wifi',
+         x:16 + (i % 3) * 50, y:172 + Math.floor(i / 3) * 40, w:30, h:24,
+         acts:['cli_video','cli_social','cli_llamada','cli_descarga']});
+  }
+  pon({id:'ap', tipo:'ap', etiqueta:'Punto de acceso WiFi', zona:'wifi', x:76, y:160, w:14, h:8, acts:[], local:true});
+  return eq;
+}
+
+const EQUIPOS = construirEquipos();
+let qos = true;
+let dirVista = 'bajada';
+let seleccionado = null;
+let tSim = 0;
+let pausado = false;
+const activas = new Set();
+let reparto = null;
+
+const sello = s => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); };
+const ondulacion = (k, t) => Math.sin(t / 2300 + sello(k) % 97) * 0.62 + Math.sin(t / 830 + sello(k) % 41) * 0.38;
+
+function faseSesion(k, a, t) {
+  const periodo = a.dur + a.gap;
+  return ((t / 1000) + sello(k) % periodo) % periodo;
+}
+function enSesion(k, a, t) { return !a.dur || faseSesion(k, a, t) < a.dur; }
+function restante(k, a, t) {
+  if (!a.dur) return null;
+  const fase = faseSesion(k, a, t);
+  return Math.ceil(fase < a.dur ? a.dur - fase : a.dur + a.gap - fase);
+}
+
+const clave = (eq, act) => `${eq.id}:${act}`;
+const baseAct = act => act === 'camara2' ? 'camara' : act;
+const datosAct = act => ACTIVIDADES[baseAct(act)];
+
+function flujosActivos() {
+  const salida = [];
+  for (const k of activas) {
+    const [id, act] = k.split(':');
+    const eq = EQUIPOS.find(e => e.id === id);
+    if (!eq) continue;
+    const a = datosAct(act);
+    const on = enSesion(k, a, tSim);
+    const mult = !on ? 0 : 1 + (a.vari ?? VARIACION) * ondulacion(k, tSim);
+    const dem = a.elastica
+      ? {bajada: on && a.bajada ? Infinity : 0, subida: on && a.subida ? Infinity : 0}
+      : {bajada: (a.bajada || 0) * mult, subida: (a.subida || 0) * mult};
+    salida.push({k, eq, act, a, on, dem});
+  }
+  return salida;
+}
+
+function maxMin(demandas, capacidad) {
+  const res = demandas.map(() => 0);
+  const orden = demandas.map((d, i) => i).sort((a, b) => demandas[a] - demandas[b]);
+  let libre = capacidad, quedan = demandas.length;
+  for (const i of orden) {
+    const dar = Math.min(demandas[i], quedan > 0 ? libre / quedan : 0);
+    res[i] = dar;
+    libre -= dar;
+    quedan--;
+  }
+  return res;
+}
+
+function repartirDireccion(flujos, dir, capacidad, conQos) {
+  const demandas = flujos.map(f => f.dem[dir] || 0);
+  const vivos = flujos.map((f, i) => i).filter(i => demandas[i] > 0);
+  const asignado = flujos.map(() => 0);
+  const porClase = {};
+  for (const c of CLASES) porClase[c.n] = {pide: 0, recibe: 0, techo: capacidad * c.techo / 100};
+  if (!vivos.length) return {asignado, porClase, usado: 0, saturado: false};
+
+  if (!conQos) {
+    const dadas = maxMin(vivos.map(i => demandas[i]), capacidad);
+    vivos.forEach((i, j) => { asignado[i] = dadas[j]; });
+  } else {
+    for (const i of vivos) porClase[flujos[i].a.clase].pide += demandas[i];
+    let libre = capacidad;
+    for (const c of CLASES) {
+      const g = Math.min(porClase[c.n].pide, capacidad * c.gar / 100);
+      porClase[c.n].recibe = g;
+      libre -= g;
+    }
+    for (const c of [...CLASES].sort((a, b) => a.prio - b.prio)) {
+      const p = porClase[c.n];
+      const dar = Math.max(0, Math.min(Math.min(p.pide, p.techo) - p.recibe, libre));
+      p.recibe += dar;
+      libre -= dar;
+    }
+    for (const c of CLASES) {
+      const idx = vivos.filter(i => flujos[i].a.clase === c.n);
+      if (!idx.length) continue;
+      const dadas = maxMin(idx.map(i => demandas[i]), porClase[c.n].recibe);
+      idx.forEach((i, j) => { asignado[i] = dadas[j]; });
+    }
+  }
+
+  for (const c of CLASES) { porClase[c.n].pide = 0; porClase[c.n].recibe = 0; }
+  for (const i of vivos) {
+    porClase[flujos[i].a.clase].pide += demandas[i];
+    porClase[flujos[i].a.clase].recibe += asignado[i];
+  }
+  const usado = asignado.reduce((s, v) => s + v, 0);
+  return {asignado, porClase, usado,
+          saturado: usado >= capacidad * 0.98 && vivos.some(i => demandas[i] === Infinity)};
+}
+
+function recalcular() {
+  const flujos = flujosActivos();
+  reparto = {
+    flujos,
+    bajada: repartirDireccion(flujos, 'bajada', SEDE.mbps, qos),
+    subida: repartirDireccion(flujos, 'subida', SEDE.mbps, qos),
+  };
+  pintarPanel();
+}
+
+function servicio(f, i) {
+  const pide = (f.dem.bajada || 0) + (f.dem.subida || 0);
+  const recibe = reparto.bajada.asignado[i] + reparto.subida.asignado[i];
+  if (!f.on) return {pide: 0, recibe: 0, ratio: 1};
+  return {pide, recibe, ratio: f.a.elastica ? Math.min(1, recibe / (SEDE.mbps * 0.4)) : (pide ? recibe / pide : 1)};
+}
+const tono = ratio => ratio >= 0.9 ? 'verde' : ratio >= 0.45 ? 'ambar' : 'rojo';
+function semaforoDe(f, i) { return tono(servicio(f, i).ratio); }
+
+function esperaDe(clase, dir) {
+  if (!dir.saturado) return {texto: 'fluida', css: 'ok'};
+  if (!qos) return {texto: 'llena', css: 'mal'};
+  return ['tiempo_real', 'critico'].includes(clase) ? {texto: 'adelanta', css: 'ok'} : {texto: 'llena', css: 'aviso'};
+}
+
+const num = v => v === Infinity ? '∞' : v >= 10 ? v.toFixed(1) : v >= 0.1 ? v.toFixed(2) : v.toFixed(3);
+
+function medidor(destino, titulo, dir) {
+  const pct = Math.min(100, 100 * dir.usado / SEDE.mbps);
+  const color = dir.saturado || pct >= 90 ? 'var(--sem-rojo)' : pct >= 70 ? 'var(--sem-ambar)' : 'var(--sem-verde)';
+  $(destino).innerHTML = `<div class="barra"><i style="width:${pct.toFixed(1)}%;background:${color}"></i></div>`
+    + `<div class="pie"><span>${titulo}</span><span>${num(dir.usado)} Mbps · ${pct.toFixed(0)} %</span></div>`;
+}
+
+function pintarPanel() {
+  const {flujos, bajada, subida} = reparto;
+  medidor('m-bajada', 'Bajada (hacia la sala)', bajada);
+  medidor('m-subida', 'Subida (hacia el operador)', subida);
+
+  const vista = reparto[dirVista];
+  $('dir-bajada').setAttribute('aria-pressed', String(dirVista === 'bajada'));
+  $('dir-subida').setAttribute('aria-pressed', String(dirVista === 'subida'));
+  $('tabla-clases').innerHTML = CLASES.map(c => {
+    const {pide, recibe} = vista.porClase[c.n];
+    if (pide === 0) return '';
+    const ratio = pide === Infinity ? Math.min(1, recibe / (SEDE.mbps * 0.4)) : recibe / pide;
+    const t = SEMAFORO[tono(ratio)].medio;
+    return `<tr><td><span class="punto" style="background:${COLOR(c.n)}"></span>${c.etiqueta}`
+      + `<div class="mini"><i style="width:${(ratio * 100).toFixed(0)}%;background:${t}"></i></div></td>`
+      + `<td class="n">${num(pide)}</td><td class="n">${num(recibe)}</td>`
+      + `<td style="color:${t}">${pide === Infinity ? 'sobrante' : (ratio * 100).toFixed(0) + ' %'}</td></tr>`;
+  }).join('') || `<tr><td colspan="4" class="vacio">Nada circula en ${dirVista}.</td></tr>`;
+
+  const e = esperaDe('tiempo_real', vista);
+  $('nota-saturacion').innerHTML = (!vista.saturado
+    ? 'Hay holgura en esta dirección: todo recibe lo que pide.'
+    : qos
+      ? 'Dirección llena. Las clases protegidas conservan su garantía y <b>adelantan</b> en la cola; el masivo y el restringido esperan.'
+      : '<span class="mal">Dirección llena y una sola cola.</span> Todos esperan detrás del mismo atasco, también la voz y los pagos, aunque sus bits quepan.')
+    + `<br>Cola de tiempo real: <span class="${e.css}">${e.texto}</span>.`;
+
+  $('nota-qos').textContent = qos
+    ? 'Seis colas con garantía, techo y prioridad por clase (estrategia «prioridad»).'
+    : 'Una sola cola para todo, por orden de llegada (estrategia «sin_qos»).';
+
+  $('encendidas').innerHTML = !flujos.length
+    ? '<p class="vacio">Nada encendido todavía.</p>'
+    : flujos.map((f, i) => {
+      const {pide, recibe, ratio} = servicio(f, i);
+      if (!f.on) {
+        return `<div class="enc" style="opacity:.45"><div class="cab"><span>`
+          + `<span class="sem" style="background:#4d5668"></span><b>${esc(f.a.etiqueta)}</b></span>`
+          + `<span class="cifra">vuelve en ${restante(f.k, f.a, tSim)} s</span></div>`
+          + `<div class="nota">${esc(f.eq.etiqueta)} · entre una sesión y la siguiente</div></div>`;
+      }
+      const t = SEMAFORO[tono(ratio)].medio;
+      const queda = restante(f.k, f.a, tSim);
+      const cifra = (f.a.elastica
+        ? `ocupa ${num(recibe)} Mbps de lo que sobra`
+        : `${num(recibe)} de ${num(pide)} Mbps · ${(ratio * 100).toFixed(0)} %`)
+        + (queda === null ? '' : ` · quedan ${queda} s`);
+      const q = esperaDe(f.a.clase, bajada.asignado[i] >= subida.asignado[i] ? bajada : subida);
+      return `<div class="enc"><div class="cab"><span><span class="sem" style="background:${t}"></span>`
+        + `<b>${esc(f.a.etiqueta)}</b></span><span class="cifra ${q.css}">cola ${q.texto}</span></div>`
+        + `<div class="nota"><span class="punto" style="background:${COLOR(f.a.clase)}"></span>`
+        + `${esc(f.eq.etiqueta)} · clase ${esc(f.a.clase)}</div>`
+        + `<div class="mini"><i style="width:${(ratio * 100).toFixed(0)}%;background:${t}"></i></div>`
+        + `<div class="cifra">${cifra}</div></div>`;
+    }).join('');
+}
+
+const ritmoVariacion = a => {
+  const v = a.vari ?? VARIACION;
+  return v ? ` ±${Math.round(v * 100)} %` : ' constantes';
+};
+const ritmoSesion = a => a.dur
+  ? `dura ${a.dur} s y descansa ${a.gap} s (tiempo simulado)`
+  : 'continua mientras esté encendida';
+
+function colocarMenu(eq) {
+  const m = $('menu');
+  const caja = $('escena').getBoundingClientRect();
+  const escala = caja.width / BASE_W;
+  const centro = (eq.x + eq.w / 2) * escala;
+  const alto = m.offsetHeight, ancho = m.offsetWidth;
+  const izq = Math.max(6, Math.min(centro - ancho / 2, caja.width - ancho - 6));
+  let arriba = eq.y * escala - alto - 10;
+  const abajo = arriba < 6;
+  if (abajo) arriba = (eq.y + eq.h) * escala + 10;
+  arriba = Math.max(6, Math.min(arriba, caja.height - alto - 6));
+  m.classList.toggle('abajo', abajo);
+  m.style.left = izq + 'px';
+  m.style.top = arriba + 'px';
+  m.style.setProperty('--flecha', Math.max(12, Math.min(centro - izq, ancho - 12)) + 'px');
+}
+
+function abrirMenu(eq) {
+  seleccionado = eq;
+  const m = $('menu');
+  const sala = SALAS[eq.zona];
+  let cuerpo;
+  if (!eq.acts.length) {
+    cuerpo = `<p class="nota" style="margin:0">` + (eq.agregado
+      ? 'No genera tráfico propio en la emulación: su actividad viaja agregada en el reporte del servidor de sala. Es una limitación declarada del proyecto.'
+      : 'Solo tiene tráfico dentro de la sala; no sale por el enlace de acceso.') + '</p>';
+  } else {
+    cuerpo = eq.acts.map(act => {
+      const a = datosAct(act);
+      const k = clave(eq, act);
+      const sufijo = act === 'camara2' ? ' (2.ª transmisión)' : '';
+      return `<label><input type="checkbox" data-k="${k}" ${activas.has(k) ? 'checked' : ''}>`
+        + `<span><b>${esc(a.etiqueta)}${sufijo}</b>`
+        + `<small><span class="punto" style="background:${COLOR(a.clase)}"></span>${a.clase} · `
+        + (a.elastica ? 'elástica, ocupa lo que sobre'
+          : `${num((a.bajada || 0) + (a.subida || 0))} Mbps` + ritmoVariacion(a))
+        + `<br>${ritmoSesion(a)}`
+        + `<br>hacia ${esc(a.destino)}`
+        + (a.nota ? `<br><i>${esc(a.nota)}</i>` : '') + `</small></span></label>`;
+    }).join('');
+  }
+  m.innerHTML = `<button class="cerrar" aria-label="Cerrar">×</button>`
+    + `<h3>${esc(eq.etiqueta)}</h3><div class="zona">${esc(sala.nombre)}</div>${cuerpo}`;
+  m.style.display = 'block';
+  colocarMenu(eq);
+  m.querySelector('.cerrar').onclick = cerrarMenu;
+  m.querySelectorAll('input').forEach(i => i.onchange = () => {
+    i.checked ? activas.add(i.dataset.k) : activas.delete(i.dataset.k);
+    recalcular();
+  });
+}
+function cerrarMenu() { $('menu').style.display = 'none'; seleccionado = null; }
+
+const PRESETS = {
+  'Día normal': ['srv:reporte', 'musica:musica', 'nvr:camara', 'tel:voip', 'pos1:pago', 'cli0:cli_social'],
+  'Sala llena': ['srv:reporte', 'musica:musica', 'sorteos:sorteo', 'nvr:camara', 'nvr:camara2', 'tel:voip',
+                 'pos1:pago', 'pos2:pago', 'cli0:cli_video', 'cli1:cli_video', 'cli2:cli_social',
+                 'cli3:cli_llamada', 'cel1:per_video'],
+  'Respaldo': ['srv:reporte', 'srv:respaldo', 'srv:archivos', 'musica:musica', 'nvr:camara', 'nvr:camara2',
+               'tel:voip', 'pos1:pago', 'caja:videollamada'],
+  'Noche alta': ['srv:reporte', 'musica:musica', 'nvr:camara', 'nvr:camara2', 'tel:voip', 'pos1:pago',
+                 'caja:descarga', 'cli0:cli_video', 'cli1:cli_video', 'cli2:cli_llamada', 'cli3:cli_social',
+                 'cli4:cli_video', 'cli5:cli_descarga', 'cel1:per_llamada'],
+};
+const NUCLEO = ['srv:reporte', 'nvr:camara', 'musica:musica'];
+const AUTO = [
+  {k:'tel:voip', p:0.55}, {k:'pos1:pago', p:0.8}, {k:'pos2:pago', p:0.55},
+  {k:'caja:videollamada', p:0.25}, {k:'caja:navegacion', p:0.5}, {k:'caja:descarga', p:0.12},
+  {k:'sorteos:sorteo', p:0.2}, {k:'nvr:camara2', p:0.5},
+  {k:'srv:respaldo', p:0.12}, {k:'srv:archivos', p:0.35},
+  {k:'cel1:navegacion', p:0.4}, {k:'cel1:per_video', p:0.25}, {k:'cel2:per_llamada', p:0.2},
+];
+for (let i = 0; i < 6; i++) {
+  AUTO.push({k:`cli${i}:cli_video`, p:0.45}, {k:`cli${i}:cli_social`, p:0.4},
+            {k:`cli${i}:cli_llamada`, p:0.12}, {k:`cli${i}:cli_descarga`, p:0.06});
+}
+let automatico = false;
+
+function marcarAuto() { $('auto').setAttribute('aria-pressed', String(automatico)); }
+
+function pasoAutomatico() {
+  for (const k of NUCLEO) activas.add(k);
+  for (let n = 0; n < 2; n++) {
+    const c = AUTO[Math.floor(Math.random() * AUTO.length)];
+    if (Math.random() < c.p) activas.add(c.k); else activas.delete(c.k);
+  }
+  if (seleccionado && $('menu').style.display === 'block') abrirMenu(seleccionado);
+}
+
+$('presets').innerHTML = Object.keys(PRESETS).map(n => `<button data-p="${esc(n)}">${esc(n)}</button>`).join('')
+  + '<button id="auto" aria-pressed="false" title="La sala se llena y se vacía sola">● En vivo</button>';
+$('presets').querySelectorAll('[data-p]').forEach(b => b.onclick = () => {
+  automatico = false;
+  marcarAuto();
+  activas.clear();
+  for (const k of PRESETS[b.dataset.p]) activas.add(k);
+  cerrarMenu();
+  recalcular();
+});
+$('auto').onclick = () => {
+  automatico = !automatico;
+  marcarAuto();
+  if (automatico) {
+    activas.clear();
+    pasoAutomatico();
+    recalcular();
+  }
+};
+$('vaciar').onclick = () => { automatico = false; marcarAuto(); activas.clear(); cerrarMenu(); recalcular(); };
+
+for (const [id, otro, dir] of [['dir-bajada', 'dir-subida', 'bajada'], ['dir-subida', 'dir-bajada', 'subida']]) {
+  $(id).onclick = () => {
+    dirVista = dir;
+    $(id).setAttribute('aria-pressed', 'true');
+    $(otro).setAttribute('aria-pressed', 'false');
+    pintarPanel();
+  };
+}
+
+for (const [id, otro] of [['qos-si', 'qos-no'], ['qos-no', 'qos-si']]) {
+  $(id).onclick = () => {
+    qos = id === 'qos-si';
+    $(id).setAttribute('aria-pressed', 'true');
+    $(otro).setAttribute('aria-pressed', 'false');
+    recalcular();
+  };
+}
+
+const lienzo = $('plano');
+const ctx = lienzo.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+const P = {
+  tinta:'#171124', exterior:'#0f0b1a',
+  muro:'#45395e', muro_luz:'#574a74', muro_sombra:'#2a2340', zocalo:'#211a33',
+  metal:'#8d98ad', metal_luz:'#c3cbd9', metal_sombra:'#4d5668',
+  madera:'#8a5a35', madera_luz:'#ab7850', madera_sombra:'#5a3a20',
+  maq:'#3f6ea8', maq_luz:'#6ba0dc', maq_sombra:'#25446a',
+  pant:'#ffd98a', pant_luz:'#fff1c8',
+  sofa:'#41568f', sofa_luz:'#5d76b5', sofa_sombra:'#28365c',
+  piel:'#e0a878', pelo:'#3a2a3f', ropa:'#c7566a',
+  verde:'#5fd37a', rojo:'#f2585b', ambar:'#ffcc55', planta:'#3f7a4a', planta_luz:'#58a164',
+};
+const PISOS = {
+  casino:  {a:'#6d2f44', b:'#5e2839', m:'#8a4059', junta:'#45202f'},
+  madera:  {a:'#7a5533', b:'#6d4a2c', m:'#8d6540', junta:'#523522'},
+  frio:    {a:'#39465e', b:'#323d52', m:'#45536e', junta:'#272f40'},
+  damero:  {a:'#4c5268', b:'#3b4055', m:'#59607a', junta:'#2c3042'},
+  oficina: {a:'#455069', b:'#3e4860', m:'#515d79', junta:'#2d3448'},
+  pasillo: {a:'#3a3350', b:'#342e48', m:'#453d5e', junta:'#272239'},
+};
+const r = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); };
+
+function bulto(x, y, w, h, base, luz, sombra) {
+  r(x, y, w, h, P.tinta);
+  r(x + 1, y + 1, w - 2, h - 2, base);
+  r(x + 1, y + 1, w - 2, 1, luz);
+  r(x + 1, y + h - 2, w - 2, 1, sombra);
+}
+
+function piso(x, y, w, h, tipo) {
+  const p = PISOS[tipo];
+  r(x, y, w, h, p.a);
+  for (let ty = y; ty < y + h; ty += 8) {
+    for (let tx = x; tx < x + w; tx += 8) {
+      const ancho = Math.min(8, x + w - tx), alto = Math.min(8, y + h - ty);
+      if ((((tx - x) / 8) + ((ty - y) / 8)) % 2) r(tx, ty, ancho, alto, p.b);
+      if (tipo === 'casino' && ancho > 3 && alto > 3) r(tx + 3, ty + 3, 2, 2, p.m);
+      if (tipo === 'madera' && alto > 1) r(tx, ty, ancho, 1, p.junta);
+      if (tipo !== 'madera') {
+        if (ancho === 8) r(tx, ty, 1, alto, p.junta);
+        if (alto === 8) r(tx, ty, ancho, 1, p.junta);
+      }
+    }
+  }
+}
+
+function paredes(s) {
+  const g = 3;
+  r(s.x - g, s.y - g, s.w + g * 2, g, P.muro);
+  r(s.x - g, s.y - g, s.w + g * 2, 1, P.muro_luz);
+  r(s.x - g, s.y + s.h, s.w + g * 2, g, P.muro_sombra);
+  r(s.x - g, s.y - g, g, s.h + g * 2, P.muro);
+  r(s.x + s.w, s.y - g, g, s.h + g * 2, P.muro);
+  const p = s.puerta;
+  const px = p.lado === 'der' ? s.x + s.w : s.x - g;
+  piso(px, p.y - 10, g, 20, 'pasillo');
+}
+
+function fondo() {
+  r(0, 0, BASE_W, BASE_H, P.exterior);
+  r(0, 0, BASE_W, 20, P.muro);
+  r(0, 0, BASE_W, 2, P.muro_luz);
+  for (let x = 0; x < BASE_W; x += 16) r(x, 2, 1, 16, P.muro_sombra);
+  r(0, 18, BASE_W, 3, P.zocalo);
+
+  piso(168, 20, 32, BASE_H - 20, 'pasillo');
+  for (const s of Object.values(SALAS)) { piso(s.x, s.y, s.w, s.h, s.piso); paredes(s); }
+
+  r(PUERTA.x - 16, 0, 32, 20, P.tinta);
+  r(PUERTA.x - 14, 2, 28, 16, '#1d2a3f');
+  r(PUERTA.x - 12, 4, 24, 5, '#2f4260');
+  r(PUERTA.x - 10, 11, 20, 6, '#101826');
+  for (let i = 0; i < 4; i++) r(PUERTA.x - 8 + i * 5, 12, 3, 2, P.verde);
+
+  for (const [x, y] of [[172, 60], [172, 110], [172, 170], [172, 220]]) {
+    r(x, y, 10, 7, P.planta);
+    r(x + 2, y - 4, 7, 6, P.planta_luz);
+    r(x + 3, y + 7, 4, 3, P.madera_sombra);
+  }
+  bulto(208, 146, 72, 7, P.madera, P.madera_luz, P.madera_sombra);
+  bulto(208, 212, 112, 7, P.madera, P.madera_luz, P.madera_sombra);
+  bulto(286, 118, 84, 7, P.metal_sombra, P.metal, '#30384a');
+}
+
+const SPRITES = {
+  tragamonedas(e) {
+    bulto(e.x, e.y, e.w, e.h, P.maq, P.maq_luz, P.maq_sombra);
+    r(e.x + 3, e.y + 4, e.w - 6, 6, P.pant);
+    r(e.x + 4, e.y + 5, e.w - 8, 2, P.pant_luz);
+    r(e.x + 3, e.y + 12, 3, 2, P.rojo);
+    r(e.x + e.w - 6, e.y + 12, 3, 2, P.verde);
+    r(e.x + 1, e.y + e.h - 4, e.w - 2, 2, P.maq_sombra);
+  },
+  derby(e) {
+    bulto(e.x, e.y + 5, e.w, e.h - 5, '#3b2f52', '#6b5a93', '#231b35');
+    r(e.x + 3, e.y + 8, e.w - 6, e.h - 12, '#6b5a93');
+    for (let i = 0; i < 4; i++) r(e.x + 5 + i * 7, e.y + 10, 3, 4, P.pant);
+    r(e.x + 6, e.y, e.w - 12, 6, P.tinta);
+    r(e.x + 7, e.y + 1, e.w - 14, 4, P.maq);
+  },
+  ruleta(e) {
+    bulto(e.x, e.y + 4, e.w, e.h - 4, '#4a2f33', '#7a4f55', '#2d1c1f');
+    r(e.x + 4, e.y + 7, e.w - 8, e.h - 13, '#c7566a');
+    r(e.x + 8, e.y + 10, e.w - 16, 3, P.pant);
+  },
+  rack(e) {
+    bulto(e.x, e.y, e.w, e.h, '#2a2440', '#403862', '#191430');
+    for (let i = 0; i < 5; i++) {
+      r(e.x + 2, e.y + 3 + i * 5, e.w - 4, 3, '#4d5668');
+      r(e.x + e.w - 5, e.y + 3 + i * 5, 2, 1, P.verde);
+    }
+  },
+  camara(e) {
+    r(e.x + 4, e.y, 3, 3, P.metal_sombra);
+    bulto(e.x, e.y + 3, e.w, 7, P.metal, P.metal_luz, P.metal_sombra);
+    r(e.x + 6, e.y + 5, 4, 4, '#2a2440');
+    r(e.x + 2, e.y + 6, 2, 1, P.rojo);
+  },
+  nvr(e) {
+    bulto(e.x, e.y, e.w, e.h, '#2a2440', '#403862', '#191430');
+    r(e.x + 2, e.y + 3, e.w - 4, 3, '#4d5668');
+    r(e.x + 3, e.y + 9, 2, 2, P.verde);
+    r(e.x + 7, e.y + 9, 2, 2, P.ambar);
+  },
+  pc(e) {
+    bulto(e.x, e.y, e.w, e.h - 5, '#2a2440', '#403862', '#191430');
+    r(e.x + 2, e.y + 2, e.w - 4, e.h - 10, '#64baff');
+    r(e.x + 3, e.y + 3, e.w - 8, 2, '#bfe0ff');
+    r(e.x + e.w / 2 - 2, e.y + e.h - 5, 4, 3, P.metal_sombra);
+    r(e.x + 2, e.y + e.h - 2, e.w - 4, 2, P.metal);
+  },
+  pos(e) {
+    bulto(e.x, e.y, e.w, e.h, P.metal_sombra, P.metal, '#30384a');
+    r(e.x + 2, e.y + 2, e.w - 4, 4, P.pant);
+    r(e.x + 2, e.y + 8, e.w - 4, 4, '#2a2440');
+  },
+  telefono(e) {
+    bulto(e.x, e.y + 4, e.w, e.h - 4, '#2a2440', '#403862', '#191430');
+    r(e.x + 2, e.y + 6, e.w - 6, 3, '#64baff');
+    r(e.x + e.w - 3, e.y, 2, 7, P.metal);
+  },
+  impresora(e) {
+    bulto(e.x, e.y + 3, e.w, e.h - 3, P.metal_sombra, P.metal, '#30384a');
+    r(e.x + 3, e.y, e.w - 6, 4, '#e6eaf0');
+    r(e.x + 3, e.y + 7, e.w - 6, 2, '#2a2440');
+  },
+  biometrico(e) {
+    bulto(e.x, e.y, e.w, e.h, '#2a2440', '#403862', '#191430');
+    r(e.x + 2, e.y + 2, e.w - 4, 4, P.verde);
+  },
+  cliente(e) {
+    bulto(e.x, e.y + 12, e.w, e.h - 12, P.sofa, P.sofa_luz, P.sofa_sombra);
+    r(e.x, e.y + 8, 5, e.h - 8, P.sofa_sombra);
+    r(e.x + e.w - 5, e.y + 8, 5, e.h - 8, P.sofa_sombra);
+    const cx = e.x + e.w / 2 - 4;
+    r(cx, e.y, 8, 7, P.pelo);
+    r(cx + 1, e.y + 2, 6, 5, P.piel);
+    r(cx + 2, e.y + 4, 1, 1, P.tinta);
+    r(cx + 5, e.y + 4, 1, 1, P.tinta);
+    r(cx - 1, e.y + 7, 10, 7, P.tinta);
+    r(cx, e.y + 8, 8, 5, P.ropa);
+  },
+  ap(e) {
+    bulto(e.x, e.y + 3, e.w, 5, P.metal_sombra, P.metal, '#30384a');
+    r(e.x + 5, e.y, 4, 3, P.verde);
+  },
+  celular(e) {
+    bulto(e.x, e.y, e.w, e.h, '#2a2440', '#403862', '#191430');
+    r(e.x + 1, e.y + 2, e.w - 2, e.h - 5, '#9baec6');
+  },
+};
+
+function colorEnlace(dir) {
+  const pct = 100 * dir.usado / SEDE.mbps;
+  return dir.saturado || pct >= 90 ? 'rojo' : pct >= 70 ? 'ambar' : 'verde';
+}
+
+function rutaDe(eq) {
+  const s = SALAS[eq.zona];
+  return [[eq.x + eq.w / 2, eq.y + eq.h / 2], s.ancla, [PASILLO, s.puerta.y],
+          [PASILLO, SW.y + 8], [PUERTA.x, PUERTA.y - 4]];
+}
+function largo(ruta) {
+  let t = 0;
+  for (let i = 1; i < ruta.length; i++) t += Math.hypot(ruta[i][0] - ruta[i - 1][0], ruta[i][1] - ruta[i - 1][1]);
+  return t;
+}
+function factorCola(clase, datos) {
+  if (!datos.saturado) return 1;
+  if (!qos) return 0.2;
+  return ['tiempo_real', 'critico'].includes(clase) ? 1 : 0.3;
+}
+
+function puntoEn(ruta, t, total) {
+  let d = t * total;
+  for (let i = 1; i < ruta.length; i++) {
+    const l = Math.hypot(ruta[i][0] - ruta[i - 1][0], ruta[i][1] - ruta[i - 1][1]);
+    if (d <= l) {
+      const f = l ? d / l : 0;
+      return [ruta[i - 1][0] + (ruta[i][0] - ruta[i - 1][0]) * f, ruta[i - 1][1] + (ruta[i][1] - ruta[i - 1][1]) * f];
+    }
+    d -= l;
+  }
+  return ruta[ruta.length - 1];
+}
+
+function dibujar(ahora) {
+  fondo();
+
+  const peor = reparto
+    ? [colorEnlace(reparto.bajada), colorEnlace(reparto.subida)]
+      .sort((a, b) => ['verde', 'ambar', 'rojo'].indexOf(b) - ['verde', 'ambar', 'rojo'].indexOf(a))[0]
+    : 'verde';
+  r(PASILLO - 1, PUERTA.y - 4, 3, SW.y - PUERTA.y + 12, SEMAFORO[peor].oscuro);
+  r(PASILLO, PUERTA.y - 4, 1, SW.y - PUERTA.y + 12, SEMAFORO[peor].medio);
+  bulto(PASILLO - 13, SW.y, 26, 10, '#2a2440', '#403862', '#191430');
+  for (let i = 0; i < 6; i++) r(PASILLO - 10 + i * 4, SW.y + 6, 2, 2, SEMAFORO[peor].medio);
+
+  const enPausa = new Set();
+  if (reparto) {
+    const porEquipo = {};
+    for (const f of reparto.flujos) porEquipo[f.eq.id] = porEquipo[f.eq.id] || f.on;
+    for (const [id, on] of Object.entries(porEquipo)) if (!on) enPausa.add(id);
+  }
+  for (const e of EQUIPOS) {
+    const s = SPRITES[e.tipo];
+    if (!s) continue;
+    ctx.globalAlpha = enPausa.has(e.id) ? 0.45 : 1;
+    s(e);
+  }
+  ctx.globalAlpha = 1;
+  if (seleccionado) {
+    ctx.strokeStyle = P.verde;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(seleccionado.x - 1.5, seleccionado.y - 1.5, seleccionado.w + 3, seleccionado.h + 3);
+  }
+
+  if (reparto) {
+    for (let i = 0; i < reparto.flujos.length; i++) {
+      const f = reparto.flujos[i];
+      const ruta = rutaDe(f.eq);
+      const total = largo(ruta);
+      const tono = SEMAFORO[semaforoDe(f, i)];
+      for (const [dir, datos] of [['bajada', reparto.bajada], ['subida', reparto.subida]]) {
+        const mbps = datos.asignado[i];
+        if (!mbps) continue;
+        const puntos = Math.max(1, Math.min(9, Math.round(mbps * 1.5)));
+        const vel = 0.055 * factorCola(f.a.clase, datos) / total;
+        for (let p = 0; p < puntos; p++) {
+          let t = ((ahora * vel) + p / puntos) % 1;
+          if (dir === 'bajada') t = 1 - t;
+          const [x, y] = puntoEn(ruta, t, total);
+          r((x | 0) - 1, (y | 0) - 1, 3, 3, tono.oscuro);
+          r(x | 0, y | 0, 2, 2, tono.medio);
+          r(x | 0, y | 0, 1, 1, tono.claro);
+        }
+      }
+    }
+  }
+}
+
+const escena = $('escena');
+const rotulo = (texto, x, y) => {
+  const d = document.createElement('div');
+  d.className = 'rotulo';
+  d.textContent = texto;
+  d.style.left = (100 * x / BASE_W) + '%';
+  d.style.top = (100 * y / BASE_H) + '%';
+  escena.appendChild(d);
+};
+for (const s of Object.values(SALAS)) rotulo(s.nombre, s.x + s.w / 2, s.y + 2);
+rotulo('Operador · Internet', PUERTA.x, 2);
+
+const aBase = ev => {
+  const c = lienzo.getBoundingClientRect();
+  return [(ev.clientX - c.left) * BASE_W / c.width, (ev.clientY - c.top) * BASE_H / c.height];
+};
+const equipoEn = (x, y) => [...EQUIPOS].reverse()
+  .find(e => x >= e.x - 2 && x <= e.x + e.w + 2 && y >= e.y - 2 && y <= e.y + e.h + 2);
+
+lienzo.onclick = ev => {
+  const eq = equipoEn(...aBase(ev));
+  eq ? abrirMenu(eq) : cerrarMenu();
+};
+lienzo.onmousemove = ev => {
+  const eq = equipoEn(...aBase(ev));
+  const g = $('globo');
+  if (!eq || (seleccionado && eq.id === seleccionado.id)) { g.style.display = 'none'; return; }
+  const encendidas = eq.acts.filter(a => activas.has(clave(eq, a))).map(a => datosAct(a).etiqueta);
+  g.innerHTML = `<b>${esc(eq.etiqueta)}</b>` + (encendidas.length ? '<br>' + esc(encendidas.join(' · ')) : '');
+  g.style.display = 'block';
+  g.style.left = (100 * (eq.x + eq.w / 2) / BASE_W) + '%';
+  g.style.top = (100 * eq.y / BASE_H) + '%';
+};
+lienzo.onmouseleave = () => { $('globo').style.display = 'none'; };
+window.addEventListener('resize', () => {
+  if (seleccionado && $('menu').style.display === 'block') colocarMenu(seleccionado);
+});
+const NAVEGABLES = EQUIPOS.filter(e => e.acts.length);
+lienzo.tabIndex = 0;
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') return cerrarMenu();
+  if (document.activeElement !== lienzo) return;
+  const paso = {ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1}[e.key];
+  if (paso === undefined) return;
+  e.preventDefault();
+  const i = NAVEGABLES.indexOf(seleccionado);
+  abrirMenu(NAVEGABLES[(i + paso + NAVEGABLES.length) % NAVEGABLES.length]);
+});
+
+$('pausa').onclick = () => {
+  pausado = !pausado;
+  $('pausa').textContent = pausado ? '▶ Reanudar' : '⏸ Pausar';
+  $('pausa').setAttribute('aria-pressed', String(pausado));
+};
+
+function reloj() {
+  const s = Math.floor(tSim / 1000);
+  $('reloj').textContent = `tiempo simulado ${String(Math.floor(s / 60)).padStart(2, '0')}:`
+    + String(s % 60).padStart(2, '0') + (pausado ? ' · en pausa' : '');
+}
+
+$('factor').onclick = () => {
+  factor = FACTORES[(FACTORES.indexOf(factor) + 1) % FACTORES.length];
+  $('factor').textContent = '×' + factor;
+};
+
+let anterior = null, desdeCalculo = 0, desdeAuto = 0;
+function bucle(ahora) {
+  const dt = anterior === null ? 0 : Math.min(ahora - anterior, 200);
+  anterior = ahora;
+  if (!pausado) {
+    tSim += dt * factor;
+    if (automatico) {
+      desdeAuto += dt * factor;
+      if (desdeAuto >= 4000) { desdeAuto = 0; pasoAutomatico(); }
+    }
+    desdeCalculo += dt;
+    if (desdeCalculo >= 250) { desdeCalculo = 0; recalcular(); reloj(); }
+  }
+  dibujar(ahora);
+  requestAnimationFrame(bucle);
+}
+recalcular();
+reloj();
+requestAnimationFrame(bucle);
+</script>
+</html>

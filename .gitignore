@@ -1,5 +1,18 @@
 .venv/
+.venv-dev/
 topologia/inventario.csv
 __pycache__/
 datos/
 topologia/switches.csv
+# generados por los scripts de CI (ci/)
+.ci-venv-*/
+.ci-libs-*/
+.ci-python
+.ci-pythonpath
+resultados-pruebas*.xml
+estado-contenedor.json
+ryu-ci.log
+
+# Corridas de presentación separadas de la tesis
+experimentos/resultados/demo*.csv
+despliegue.json

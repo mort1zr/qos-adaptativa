@@ -1,0 +1,26 @@
+# Controlador en contenedor, para la VM del laboratorio.
+#
+#   docker compose up -d --build     # construye y levanta
+#   docker compose logs -f           # mensajes de Ryu
+#   docker compose down              # lo apaga
+#
+# La topología de Mininet no cambia: sigue conectándose a 127.0.0.1:6633, que ahora
+# es el contenedor. Abre el panel en http://127.0.0.1:8080/panel
+#
+# Ojo: "sudo mn -c" ya no apaga al controlador (antes mataba a ryu-manager), pero
+# NO levantes a la vez el Ryu del .venv y el contenedor: los dos quieren el puerto 6633.
+services:
+  controlador:
+    build: .
+    image: qos-controlador:local
+    container_name: qos-controlador
+    restart: unless-stopped
+    ports:
+      # Solo en 127.0.0.1: la API no tiene autenticación (igual que el Ryu del .venv).
+      - "127.0.0.1:6633:6633"
+      - "127.0.0.1:6653:6653"
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./topologia:/app/topologia:ro      # inventario.csv y switches.csv (los escribe la topología)
+      - ./politicas:/app/politicas:ro      # políticas, destinos y horario sin reconstruir la imagen
+      - ./datos:/app/datos                 # telemetria.db queda en la VM

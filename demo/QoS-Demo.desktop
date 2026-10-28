@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Demo QoS adaptativa
+Comment=Iniciar la consola del laboratorio
+Exec="/home/elonmusk/Documents/Codex/2026-10-26/referenced-chatgpt-conversation-this-is-an/qos-adaptativa/demo/iniciar_demo.sh"
+Terminal=true
+Categories=Education;Network;

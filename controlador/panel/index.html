@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel QoS · Empresa XYZ</title>
+<!-- Panel en vivo del controlador (Sprint 3). Lo sirve la aplicación de Ryu en
+     http://127.0.0.1:8080/panel y lee su API cada 5 s. Sin librerías externas:
+     funciona sin Internet y dentro del contenedor. -->
+<style>
+  :root {
+    --fondo: #f4f5f7; --tarjeta: #ffffff; --texto: #1d2330; --suave: #5f6b7a; --linea: #e3e6ea;
+    --acento: #2563eb; --ok: #15803d; --mal: #b91c1c; --aviso: #b45309;
+    --tiempo_real: #2563eb; --critico: #b91c1c; --negocio: #7c3aed; --vigilancia: #0e7490;
+    --masivo: #9ca3af; --restringido: #d97706;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --fondo: #0f141b; --tarjeta: #171e27; --texto: #e6eaf0; --suave: #93a0b1; --linea: #263140;
+            --acento: #60a5fa; --ok: #4ade80; --mal: #f87171; --aviso: #fbbf24; --masivo: #6b7280; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--fondo); color: var(--texto); }
+  header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between;
+           padding: 16px 24px; background: var(--tarjeta); border-bottom: 1px solid var(--linea); }
+  h1 { font-size: 18px; margin: 0; }
+  h1 small { font-weight: 400; color: var(--suave); margin-left: 8px; }
+  h2 { font-size: 15px; margin: 0 0 12px; }
+  main { padding: 20px 24px; max-width: 1400px; margin: 0 auto; display: grid; gap: 20px; }
+  .fila { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .pastilla { padding: 3px 10px; border-radius: 999px; background: var(--fondo); border: 1px solid var(--linea);
+              color: var(--suave); font-size: 12px; white-space: nowrap; }
+  .pastilla b { color: var(--texto); font-weight: 600; }
+  .pastilla.ok b { color: var(--ok); } .pastilla.mal b { color: var(--mal); }
+  button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer;
+           border: 1px solid var(--linea); background: var(--tarjeta); color: var(--texto); }
+  button.activo { background: var(--acento); border-color: var(--acento); color: #fff; }
+  .rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+  .tarjeta { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 10px; padding: 14px 16px; }
+  .sede { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .sede span { color: var(--suave); font-size: 12px; }
+  .uso { display: grid; grid-template-columns: 52px 1fr 46px; gap: 6px; align-items: center; font-size: 12px;
+         color: var(--suave); margin: 4px 0; }
+  .barra { height: 8px; border-radius: 4px; background: var(--fondo); overflow: hidden; }
+  .barra i { display: block; height: 100%; background: var(--acento); }
+  .uso b { text-align: right; color: var(--texto); font-variant-numeric: tabular-nums; }
+  svg.linea { width: 100%; height: 56px; display: block; margin: 8px 0 6px; }
+  .clases { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--fondo); }
+  .leyenda { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--suave); }
+  .leyenda i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .tabla { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td { white-space: nowrap; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--linea); }
+  th { color: var(--suave); font-weight: 500; font-size: 12px; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  main > *, .dos > * { min-width: 0; }
+  .dos { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+  @media (max-width: 900px) { .dos { grid-template-columns: minmax(0, 1fr); } main, header { padding: 14px 16px; } }
+  .vacio { color: var(--suave); font-size: 13px; }
+  .pie { color: var(--suave); font-size: 12px; text-align: center; padding-bottom: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Empresa XYZ · QoS adaptativa <small>panel en vivo del controlador</small></h1>
+  <div class="fila">
+    <span class="pastilla" id="p-conexion">conectando…</span>
+    <span class="pastilla">switches de acceso <b id="p-switches">–</b></span>
+    <span class="pastilla">decisión p95 <b id="p-decision">–</b></span>
+    <span class="pastilla">actualizado <b id="p-hora">–</b></span>
+  </div>
+  <div class="fila" id="clasificadores" title="Quién decide la cola de cada flujo"></div>
+</header>
+<main>
+  <section>
+    <h2>Enlaces de acceso <span class="vacio">· uso en los últimos 15 s y gráfica de 10 minutos (bajada en color, subida en gris)</span></h2>
+    <div class="rejilla" id="enlaces"><p class="vacio">Esperando telemetría…</p></div>
+    <div class="leyenda" id="leyenda" style="margin-top:10px"></div>
+  </section>
+  <section class="dos">
+    <div class="tarjeta">
+      <h2>Demanda por área <span class="vacio">· últimos 5 min, los dos sentidos</span></h2>
+      <div class="tabla"><table><thead><tr><th>Sede</th><th>Área</th><th>Clase</th><th class="n">Mbps</th></tr></thead>
+        <tbody id="areas"></tbody></table></div>
+    </div>
+    <div class="tarjeta">
+      <h2>Decisiones del controlador <span class="vacio">· últimos 5 min</span></h2>
+      <div class="tabla"><table><thead><tr><th>Clasificador</th><th>Clase</th><th class="n">Cola</th>
+        <th class="n">Flujos</th><th class="n">Por adelantado</th><th class="n">p95</th></tr></thead>
+        <tbody id="decisiones"></tbody></table></div>
+    </div>
+  </section>
+  <p class="pie">Datos: telemetría OpenFlow del controlador Ryu (contadores de flujos y puertos cada 5 s, sin mirar
+    contenido). API: <code>/qos/estado</code>, <code>/qos/telemetria</code>, <code>/qos/serie</code>.</p>
+</main>
+<script>
+const CLASES = ["tiempo_real", "critico", "negocio", "vigilancia", "masivo", "restringido"];
+const NOMBRE_SEDE = id => id === 0 || id === "0" ? "Oficina central" : `Sala ${id}`;
+const color = c => getComputedStyle(document.documentElement).getPropertyValue(`--${c}`).trim() || "#999";
+const $ = id => document.getElementById(id);
+const esc = t => String(t).replace(/[&<>"]/g, ch => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[ch]));
+
+async function leer(url) {
+  const r = await fetch(url, {cache: "no-store"});
+  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  return r.json();
+}
+
+function linea(puntos, capacidad, desde, hasta, trazo, ancho) {
+  if (!puntos.length || !capacidad) return "";
+  const x = t => ((t - desde) / (hasta - desde)) * 300, y = v => 54 - Math.min(v / capacidad, 1) * 50;
+  const d = puntos.map(([t, v], i) => `${i ? "L" : "M"}${x(t).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  return `<path d="${d}" fill="none" stroke="${trazo}" stroke-width="${ancho}" stroke-linejoin="round"/>`;
+}
+
+function tarjetaSede(id, serie, clases, hasta) {
+  const cap = serie ? serie._capacidad : null;
+  // Uso "actual" = promedio de los últimos 3 sondeos (15 s): el tráfico va en ráfagas.
+  const ultimo = s => {
+    const p = serie ? serie[s].slice(-3) : [];
+    return p.length ? p.reduce((a, x) => a + x[1], 0) / p.length : 0;
+  };
+  const fila = (s, nombre) => {
+    const pct = cap ? Math.min(100, 100 * ultimo(s) / cap) : 0;
+    const c = pct >= 90 ? "var(--mal)" : pct >= 70 ? "var(--aviso)" : s === "bajada" ? "var(--acento)" : "var(--masivo)";
+    return `<div class="uso"><span>${nombre}</span><div class="barra"><i style="width:${pct}%;background:${c}"></i></div>`
+         + `<b>${pct.toFixed(0)} %</b></div>`;
+  };
+  const desde = hasta - 600;
+  const svg = `<svg class="linea" viewBox="0 0 300 56" preserveAspectRatio="none" role="img" aria-label="Uso en 10 minutos">`
+    + `<line x1="0" y1="4" x2="300" y2="4" stroke="var(--linea)" stroke-dasharray="3 3"/>`
+    + `<line x1="0" y1="54" x2="300" y2="54" stroke="var(--linea)"/>`
+    + linea(serie ? serie.subida : [], cap, desde, hasta, "var(--masivo)", 1.5)
+    + linea(serie ? serie.bajada : [], cap, desde, hasta, "var(--acento)", 2) + `</svg>`;
+  const total = clases.reduce((a, c) => a + c.mbps, 0);
+  const barra = total > 0 ? clases.map(c => `<i title="${c.clase}: ${c.mbps.toFixed(2)} Mbps" `
+      + `style="width:${(100 * c.mbps / total).toFixed(1)}%;background:${color(c.clase)}"></i>`).join("")
+    : "";
+  return `<div class="tarjeta"><div class="sede"><b>${NOMBRE_SEDE(id)}</b><span>${cap ? cap + " Mbps" : ""}</span></div>`
+    + fila("bajada", "Bajada") + fila("subida", "Subida") + svg
+    + `<div class="clases" title="Demanda por clase, últimos 5 min">${barra}</div>`
+    + `<div class="leyenda" style="margin-top:6px">${total > 0 ? total.toFixed(2) + " Mbps por clase" : "sin tráfico"}</div></div>`;
+}
+
+function pintarClasificadores(estado) {
+  $("clasificadores").innerHTML = Object.entries(estado.clasificadores).map(([n, d]) =>
+    `<button title="${esc(d)}" class="${n === estado.clasificador ? "activo" : ""}" data-n="${n}">${esc(n)}</button>`).join("");
+  $("clasificadores").querySelectorAll("button").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    await fetch("/qos/clasificador", {method: "PUT", body: JSON.stringify({nombre: b.dataset.n})});
+    actualizar();
+  });
+}
+
+async function actualizar() {
+  try {
+    const [estado, datos, serie] = await Promise.all([leer("/qos/estado"), leer("/qos/telemetria?minutos=5"),
+                                                      leer("/qos/serie?minutos=10")]);
+    $("p-conexion").className = "pastilla ok"; $("p-conexion").innerHTML = "<b>●</b> controlador en línea";
+    $("p-switches").textContent = `${estado.switches_acceso.length} / 5`;
+    $("p-decision").textContent = estado.decision_ms.p95 == null ? "–" : `${estado.decision_ms.p95.toFixed(2)} ms`;
+    $("p-hora").textContent = new Date(datos.ahora * 1000).toLocaleTimeString();
+    pintarClasificadores(estado);
+    if (new URLSearchParams(location.search).has("demo")) {
+      try {
+        const demo = await leer("/demo/estado");
+        const bloqueado = demo.vista_previa || (demo.trabajo.tipo === "escenario" &&
+          ["iniciando", "corriendo"].includes(demo.trabajo.estado));
+        $("clasificadores").querySelectorAll("button").forEach(b => {
+          b.disabled = bloqueado;
+          if (bloqueado) b.title = "El escenario controla el clasificador o la vista es de solo lectura";
+        });
+      } catch (_) {
+        $("clasificadores").querySelectorAll("button").forEach(b => { b.disabled = true; });
+      }
+    }
+
+    const sedes = [...new Set([...Object.keys(serie), ...datos.clases.map(c => String(c.sede_id))])]
+      .filter(s => s !== "null").sort((a, b) => a - b);
+    const porSede = {};
+    for (const c of datos.clases) {
+      const k = String(c.sede_id), lista = (porSede[k] = porSede[k] || {});
+      lista[c.clase] = (lista[c.clase] || 0) + c.promedio_mbps;
+    }
+    $("enlaces").innerHTML = sedes.length ? sedes.map(s => tarjetaSede(s, serie[s],
+        CLASES.filter(c => porSede[s] && porSede[s][c] > 0).map(c => ({clase: c, mbps: porSede[s][c]})),
+        datos.ahora)).join("")
+      : `<p class="vacio">Sin telemetría todavía: levanta la red y genera tráfico.</p>`;
+    $("leyenda").innerHTML = CLASES.map(c => `<span><i style="background:${color(c)}"></i>${c}</span>`).join("");
+
+    $("areas").innerHTML = datos.areas.length ? datos.areas.map(a => `<tr><td>${esc(NOMBRE_SEDE(a.sede_id))}</td>`
+        + `<td>${esc(a.area)}</td><td><span class="leyenda"><span><i style="background:${color(a.clase)}"></i>`
+        + `${esc(a.clase)}</span></span></td><td class="n">${a.mbps.toFixed(2)}</td></tr>`).join("")
+      : `<tr><td colspan="4" class="vacio">Sin tráfico en los últimos 5 minutos.</td></tr>`;
+    $("decisiones").innerHTML = datos.decisiones.length ? datos.decisiones.map(d => `<tr><td>${esc(d.clasificador)}</td>`
+        + `<td><span class="leyenda"><span><i style="background:${color(d.clase)}"></i>${esc(d.clase)}</span></span></td>`
+        + `<td class="n">${d.cola}</td><td class="n">${d.decisiones}</td><td class="n">${d.proactivas}</td>`
+        + `<td class="n">${d.p95_ms.toFixed(2)} ms</td></tr>`).join("")
+      : `<tr><td colspan="6" class="vacio">Sin decisiones en los últimos 5 minutos.</td></tr>`;
+  } catch (e) {
+    $("p-conexion").className = "pastilla mal"; $("p-conexion").innerHTML = "<b>●</b> sin conexión con el controlador";
+  }
+}
+actualizar();
+setInterval(actualizar, 5000);
+</script>
+</body>
+</html>
