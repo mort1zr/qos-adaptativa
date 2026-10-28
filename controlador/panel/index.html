@@ -71,6 +71,7 @@
     <span class="pastilla">actualizado <b id="p-hora">–</b></span>
   </div>
   <div class="fila" id="clasificadores" title="Quién decide la cola de cada flujo"></div>
+  <span class="pastilla mal" id="p-clasificador" role="status" hidden></span>
 </header>
 <main>
   <section>
@@ -148,7 +149,20 @@ function pintarClasificadores(estado) {
     `<button title="${esc(d)}" class="${n === estado.clasificador ? "activo" : ""}" data-n="${n}">${esc(n)}</button>`).join("");
   $("clasificadores").querySelectorAll("button").forEach(b => b.onclick = async () => {
     b.disabled = true;
-    await fetch("/qos/clasificador", {method: "PUT", body: JSON.stringify({nombre: b.dataset.n})});
+    try {
+      // Sin la cabecera el orquestador de la demo responde 415 y el cambio se pierde sin avisar.
+      const r = await fetch("/qos/clasificador", {method: "PUT", headers: {"Content-Type": "application/json"},
+                                                  body: JSON.stringify({nombre: b.dataset.n})});
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.error || `el servidor respondió ${r.status}`);
+      }
+      $("p-clasificador").hidden = true;
+    } catch (e) {
+      $("p-clasificador").hidden = false;
+      $("p-clasificador").className = "pastilla mal";
+      $("p-clasificador").innerHTML = `<b>●</b> ${esc(e.message)}`;
+    }
     actualizar();
   });
 }
