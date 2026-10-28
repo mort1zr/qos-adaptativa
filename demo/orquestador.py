@@ -304,7 +304,9 @@ class Demo:
             self.verificar_red_externa()
         encendido = self.api_activa()
         self.run(["mn", "-c"], timeout=30)
-        if encendido and self.cfg["controlador"] == "venv" and not self.api_activa():
+        # 'mn -c' mata cualquier proceso ryu-manager del anfitrión, y el del contenedor
+        # también es visible desde aquí: se reinicia el controlador sea cual sea el modo.
+        if encendido and not self.api_activa():
             self.controlador(True)
         self.devolver_archivos()
 
