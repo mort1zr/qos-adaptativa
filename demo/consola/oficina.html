@@ -887,6 +887,13 @@ $('factor').onclick = () => {
 };
 
 let anterior = null, desdeCalculo = 0, desdeAuto = 0;
+if (parent !== window) {
+  const avisarAlto = () => parent.postMessage(
+    {oficina: Math.ceil(document.documentElement.scrollHeight)}, location.origin);
+  new ResizeObserver(avisarAlto).observe(document.body);
+  addEventListener('load', avisarAlto);
+}
+
 function bucle(ahora) {
   const dt = anterior === null ? 0 : Math.min(ahora - anterior, 200);
   anterior = ahora;

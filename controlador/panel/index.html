@@ -18,6 +18,9 @@
     :root { --fondo: #0f141b; --tarjeta: #171e27; --texto: #e6eaf0; --suave: #93a0b1; --linea: #263140;
             --acento: #60a5fa; --ok: #4ade80; --mal: #f87171; --aviso: #fbbf24; --masivo: #6b7280; }
   }
+  /* Dentro de la consola (/panel?demo=1) el tema es siempre oscuro, como el resto de sus pestañas. */
+  :root[data-demo] { --fondo: #0f141b; --tarjeta: #171e27; --texto: #e6eaf0; --suave: #93a0b1; --linea: #263140;
+                     --acento: #60a5fa; --ok: #4ade80; --mal: #f87171; --aviso: #fbbf24; --masivo: #6b7280; }
   * { box-sizing: border-box; }
   body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
          background: var(--fondo); color: var(--texto); }
@@ -71,6 +74,7 @@
     <span class="pastilla">actualizado <b id="p-hora">–</b></span>
   </div>
   <div class="fila" id="clasificadores" title="Quién decide la cola de cada flujo"></div>
+  <span class="pastilla mal" id="p-clasificador" role="status" hidden></span>
 </header>
 <main>
   <section>
@@ -96,6 +100,7 @@
 </main>
 <script>
 const CLASES = ["tiempo_real", "critico", "negocio", "vigilancia", "masivo", "restringido"];
+if (new URLSearchParams(location.search).has("demo")) document.documentElement.dataset.demo = "1";
 const NOMBRE_SEDE = id => id === 0 || id === "0" ? "Oficina central" : `Sala ${id}`;
 const color = c => getComputedStyle(document.documentElement).getPropertyValue(`--${c}`).trim() || "#999";
 const $ = id => document.getElementById(id);
@@ -148,7 +153,20 @@ function pintarClasificadores(estado) {
     `<button title="${esc(d)}" class="${n === estado.clasificador ? "activo" : ""}" data-n="${n}">${esc(n)}</button>`).join("");
   $("clasificadores").querySelectorAll("button").forEach(b => b.onclick = async () => {
     b.disabled = true;
-    await fetch("/qos/clasificador", {method: "PUT", body: JSON.stringify({nombre: b.dataset.n})});
+    try {
+      // Sin la cabecera el orquestador de la demo responde 415 y el cambio se pierde sin avisar.
+      const r = await fetch("/qos/clasificador", {method: "PUT", headers: {"Content-Type": "application/json"},
+                                                  body: JSON.stringify({nombre: b.dataset.n})});
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.error || `el servidor respondió ${r.status}`);
+      }
+      $("p-clasificador").hidden = true;
+    } catch (e) {
+      $("p-clasificador").hidden = false;
+      $("p-clasificador").className = "pastilla mal";
+      $("p-clasificador").innerHTML = `<b>●</b> ${esc(e.message)}`;
+    }
     actualizar();
   });
 }
