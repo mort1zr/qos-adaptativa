@@ -14,8 +14,8 @@ body{margin:0;background:var(--fondo);color:var(--texto);font:14px/1.5 system-ui
 h1{font-size:19px;margin:0}
 h2{font-size:12px;margin:0 0 8px;text-transform:uppercase;letter-spacing:1.3px;color:var(--suave)}
 .marca{text-transform:uppercase;letter-spacing:2px;color:var(--verde);font-size:10px;font-weight:700}
-.escena{position:relative;width:768px;max-width:100%;border:1px solid var(--borde);border-radius:10px;overflow:hidden;margin-top:8px}
-canvas{display:block;width:100%;height:auto;image-rendering:pixelated;cursor:pointer}
+.escena{position:relative;width:768px;max-width:100%;border:1px solid var(--borde);border-radius:10px;margin-top:8px}
+canvas{display:block;width:100%;height:auto;image-rendering:pixelated;cursor:pointer;border-radius:9px}
 .rotulo{position:absolute;transform:translate(-50%,0);font:700 9px/1 system-ui,sans-serif;letter-spacing:.6px;
  color:#f7ecd5;background:rgba(14,10,24,.72);border-radius:3px;padding:2px 5px;pointer-events:none;
  white-space:nowrap;text-transform:uppercase}
@@ -23,9 +23,8 @@ canvas{display:block;width:100%;height:auto;image-rendering:pixelated;cursor:poi
  background:rgba(14,10,24,.92);border:1px solid rgba(247,236,213,.28);border-radius:5px;padding:4px 7px;
  pointer-events:none;white-space:nowrap;display:none;z-index:3}
 .menu{position:absolute;z-index:5;width:226px;background:#16213a;border:1px solid #46618c;border-radius:9px;
- padding:9px 10px;box-shadow:0 10px 26px rgba(0,0,0,.55);display:none;transform:translate(-50%,-104%)}
-.menu.abajo{transform:translate(-50%,10px)}
-.menu::after{content:'';position:absolute;left:50%;margin-left:-6px;border:6px solid transparent;
+ padding:9px 10px;box-shadow:0 10px 26px rgba(0,0,0,.55);display:none}
+.menu::after{content:'';position:absolute;left:var(--flecha,50%);margin-left:-6px;border:6px solid transparent;
  border-top-color:#46618c;bottom:-12px}
 .menu.abajo::after{bottom:auto;top:-12px;border-top-color:transparent;border-bottom-color:#46618c}
 .menu h3{margin:0 0 2px;font-size:13px}
@@ -76,13 +75,16 @@ td.n{text-align:right;font-variant-numeric:tabular-nums}
       <div class="menu" id="menu"></div>
     </div>
     <div class="leyenda">
-      <span><span class="sem" style="background:var(--sem-verde)"></span>Holgado</span>
-      <span><span class="sem" style="background:var(--sem-ambar)"></span>Apretado</span>
-      <span><span class="sem" style="background:var(--sem-rojo)"></span>Ahogado</span>
-      <span><b>Cuántos puntos</b> = Mbps · <b>a qué velocidad van</b> = lo que esperan en la cola</span>
-      <span>Haz clic en un equipo, o Tab y las flechas</span>
-      <span>Reparto calculado con <code>politicas.yaml</code>; no son mediciones</span>
+      <span><span class="sem" style="background:var(--sem-verde)"></span><b>Holgado</b> · recibe todo el ancho de banda que pide</span>
+      <span><span class="sem" style="background:var(--sem-ambar)"></span><b>Apretado</b> · recibe entre la mitad y casi todo</span>
+      <span><span class="sem" style="background:var(--sem-rojo)"></span><b>Ahogado</b> · recibe menos de la mitad</span>
     </div>
+    <p class="nota" style="margin:8px 0 0">
+      Cada punto que recorre un cable es tráfico de ese equipo. <b>Cuántos puntos hay</b> dice los Mbps
+      que está llevando ese flujo; <b>a qué velocidad avanzan</b> dice cuánto esperan en la cola del switch,
+      que es la latencia. Cuando el enlace se llena, las clases con prioridad siguen corriendo igual de
+      rápido y las demás se arrastran.
+    </p>
 
     <div class="tarjeta" style="margin-top:14px">
       <h2>Actividades encendidas</h2>
@@ -426,6 +428,23 @@ const ritmoSesion = a => a.dur
   ? `dura ${a.dur} s y descansa ${a.gap} s (tiempo simulado)`
   : 'continua mientras esté encendida';
 
+function colocarMenu(eq) {
+  const m = $('menu');
+  const caja = $('escena').getBoundingClientRect();
+  const escala = caja.width / BASE_W;
+  const centro = (eq.x + eq.w / 2) * escala;
+  const alto = m.offsetHeight, ancho = m.offsetWidth;
+  const izq = Math.max(6, Math.min(centro - ancho / 2, caja.width - ancho - 6));
+  let arriba = eq.y * escala - alto - 10;
+  const abajo = arriba < 6;
+  if (abajo) arriba = (eq.y + eq.h) * escala + 10;
+  arriba = Math.max(6, Math.min(arriba, caja.height - alto - 6));
+  m.classList.toggle('abajo', abajo);
+  m.style.left = izq + 'px';
+  m.style.top = arriba + 'px';
+  m.style.setProperty('--flecha', Math.max(12, Math.min(centro - izq, ancho - 12)) + 'px');
+}
+
 function abrirMenu(eq) {
   seleccionado = eq;
   const m = $('menu');
@@ -452,11 +471,8 @@ function abrirMenu(eq) {
   }
   m.innerHTML = `<button class="cerrar" aria-label="Cerrar">×</button>`
     + `<h3>${esc(eq.etiqueta)}</h3><div class="zona">${esc(sala.nombre)}</div>${cuerpo}`;
-  m.classList.toggle('abajo', eq.y < 96);
-  const izq = Math.min(Math.max(100 * (eq.x + eq.w / 2) / BASE_W, 16), 84);
-  m.style.left = izq + '%';
-  m.style.top = (100 * (eq.y < 96 ? eq.y + eq.h : eq.y) / BASE_H) + '%';
   m.style.display = 'block';
+  colocarMenu(eq);
   m.querySelector('.cerrar').onclick = cerrarMenu;
   m.querySelectorAll('input').forEach(i => i.onchange = () => {
     i.checked ? activas.add(i.dataset.k) : activas.delete(i.dataset.k);
@@ -838,6 +854,9 @@ lienzo.onmousemove = ev => {
   g.style.top = (100 * eq.y / BASE_H) + '%';
 };
 lienzo.onmouseleave = () => { $('globo').style.display = 'none'; };
+window.addEventListener('resize', () => {
+  if (seleccionado && $('menu').style.display === 'block') colocarMenu(seleccionado);
+});
 const NAVEGABLES = EQUIPOS.filter(e => e.acts.length);
 lienzo.tabIndex = 0;
 document.addEventListener('keydown', e => {
