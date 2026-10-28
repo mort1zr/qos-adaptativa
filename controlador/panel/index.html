@@ -18,6 +18,9 @@
     :root { --fondo: #0f141b; --tarjeta: #171e27; --texto: #e6eaf0; --suave: #93a0b1; --linea: #263140;
             --acento: #60a5fa; --ok: #4ade80; --mal: #f87171; --aviso: #fbbf24; --masivo: #6b7280; }
   }
+  /* Dentro de la consola (/panel?demo=1) el tema es siempre oscuro, como el resto de sus pestañas. */
+  :root[data-demo] { --fondo: #0f141b; --tarjeta: #171e27; --texto: #e6eaf0; --suave: #93a0b1; --linea: #263140;
+                     --acento: #60a5fa; --ok: #4ade80; --mal: #f87171; --aviso: #fbbf24; --masivo: #6b7280; }
   * { box-sizing: border-box; }
   body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
          background: var(--fondo); color: var(--texto); }
@@ -97,6 +100,7 @@
 </main>
 <script>
 const CLASES = ["tiempo_real", "critico", "negocio", "vigilancia", "masivo", "restringido"];
+if (new URLSearchParams(location.search).has("demo")) document.documentElement.dataset.demo = "1";
 const NOMBRE_SEDE = id => id === 0 || id === "0" ? "Oficina central" : `Sala ${id}`;
 const color = c => getComputedStyle(document.documentElement).getPropertyValue(`--${c}`).trim() || "#999";
 const $ = id => document.getElementById(id);
