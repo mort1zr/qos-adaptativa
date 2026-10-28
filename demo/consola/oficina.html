@@ -52,7 +52,7 @@ td.n{text-align:right;font-variant-numeric:tabular-nums}
 .medidor .barra{height:9px;border-radius:5px;background:#0d1626;overflow:hidden;border:1px solid var(--borde)}
 .medidor .barra i{display:block;height:100%;transition:width .25s}
 .medidor .pie{display:flex;justify-content:space-between;font-size:10px;color:var(--suave);margin-top:2px}
-.lista{max-height:220px;overflow:auto}
+.lista{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:0 18px;align-content:start}
 .mini{height:5px;border-radius:3px;background:#0d1626;overflow:hidden;margin-top:3px;width:100%}
 .mini i{display:block;height:100%}
 .enc{padding:7px 0;border-bottom:1px solid var(--borde)}
@@ -60,7 +60,6 @@ td.n{text-align:right;font-variant-numeric:tabular-nums}
 .enc .cifra{font-size:11px;color:var(--suave);font-variant-numeric:tabular-nums;white-space:nowrap}
 .ok{color:var(--verde)}.mal{color:var(--rojo)}.aviso{color:var(--ambar)}
 .nota{font-size:11px;color:var(--suave);line-height:1.55}
-.cinta{background:#2a2113;border:1px solid #6b5422;color:#ffd79a;border-radius:9px;padding:8px 10px;font-size:11px;margin-bottom:12px;line-height:1.5}
 .leyenda{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--suave);margin-top:8px}
 .vacio{color:var(--suave);font-size:12px}
 @media(max-width:1100px){.envoltura{grid-template-columns:1fr}.escena{width:100%}}
@@ -82,16 +81,16 @@ td.n{text-align:right;font-variant-numeric:tabular-nums}
       <span><span class="sem" style="background:var(--sem-rojo)"></span>Ahogado</span>
       <span><b>Cuántos puntos</b> = Mbps · <b>a qué velocidad van</b> = lo que esperan en la cola</span>
       <span>Haz clic en un equipo, o Tab y las flechas</span>
+      <span>Reparto calculado con <code>politicas.yaml</code>; no son mediciones</span>
+    </div>
+
+    <div class="tarjeta" style="margin-top:14px">
+      <h2>Actividades encendidas</h2>
+      <div class="lista" id="encendidas"><p class="vacio">Nada encendido todavía.</p></div>
     </div>
   </div>
 
   <div>
-    <div class="cinta">
-      <b>Simulador didáctico.</b> Reparte el enlace aplicando las clases y límites de
-      <code>politicas.yaml</code> y los consumos de <code>trafico/perfiles.yaml</code>.
-      <b>No son mediciones</b>: la evidencia real está en la pestaña Demo.
-    </div>
-
     <div class="tarjeta">
       <h2>Control del enlace</h2>
       <div class="fila">
@@ -101,6 +100,11 @@ td.n{text-align:right;font-variant-numeric:tabular-nums}
       </div>
       <p class="nota" id="nota-qos"></p>
       <div class="fila" id="presets"></div>
+      <div class="fila" style="margin-top:9px">
+        <button id="pausa">⏸ Pausar</button>
+        <button id="factor" title="Velocidad del reloj simulado">×6</button>
+        <span class="nota" id="reloj"></span>
+      </div>
     </div>
 
     <div class="tarjeta">
@@ -116,11 +120,6 @@ td.n{text-align:right;font-variant-numeric:tabular-nums}
         <tbody id="tabla-clases"></tbody>
       </table>
       <p class="nota" id="nota-saturacion"></p>
-    </div>
-
-    <div class="tarjeta">
-      <h2>Actividades encendidas</h2>
-      <div class="lista" id="encendidas"><p class="vacio">Nada encendido todavía.</p></div>
     </div>
   </div>
 </div>
@@ -148,26 +147,29 @@ const SEMAFORO = {
 };
 
 const ACTIVIDADES = {
-  voip:        {etiqueta:'Llamada telefónica', clase:'tiempo_real', bajada:0.0808, subida:0.0808, destino:'central de la oficina'},
-  videollamada:{etiqueta:'Videollamada HD',    clase:'tiempo_real', bajada:2.5,    subida:1.5,    destino:'inetvc'},
+  voip:        {etiqueta:'Llamada telefónica', clase:'tiempo_real', bajada:0.0808, subida:0.0808, destino:'central de la oficina', vari:0},
+  videollamada:{etiqueta:'Videollamada HD',    clase:'tiempo_real', bajada:2.5,    subida:1.5,    destino:'inetvc', vari:0.15},
   reporte:     {etiqueta:'Reporte de las máquinas', clase:'critico', bajada:0.012, subida:0.048,  destino:'servidor de gestión'},
-  pago:        {etiqueta:'Cobro con tarjeta',  clase:'critico',     bajada:0.0006, subida:0.0003, destino:'procesadora de pagos'},
+  pago:        {etiqueta:'Cobro con tarjeta',  clase:'critico',     bajada:0.0006, subida:0.0003, destino:'procesadora de pagos', dur:2, gap:38},
   sorteo:      {etiqueta:'Sorteo en curso',    clase:'critico',     bajada:0.0024, subida:0.0032, destino:'servidor de gestión'},
-  musica:      {etiqueta:'Música de la sala',  clase:'negocio',     bajada:1.0,    subida:0.0012, destino:'streaming'},
-  camara:      {etiqueta:'Cámara vista en remoto', clase:'vigilancia', bajada:0,   subida:1.5,    destino:'monitoreo de la oficina'},
-  archivos:    {etiqueta:'Enviar archivos a la oficina', clase:'negocio', bajada:0.05, subida:1.2, destino:'servidor de archivos'},
-  navegacion:  {etiqueta:'Navegación web',     clase:'masivo',      bajada:0.1,    subida:0.004,  destino:'inetweb'},
+  musica:      {etiqueta:'Música de la sala',  clase:'negocio',     bajada:1.0,    subida:0.0012, destino:'streaming', vari:0.2},
+  camara:      {etiqueta:'Cámara vista en remoto', clase:'vigilancia', bajada:0,   subida:1.5,    destino:'monitoreo de la oficina', vari:0.2},
+  archivos:    {etiqueta:'Enviar archivos a la oficina', clase:'negocio', bajada:0.05, subida:1.2, destino:'servidor de archivos', dur:20, gap:40},
+  navegacion:  {etiqueta:'Navegación web',     clase:'masivo',      bajada:0.1,    subida:0.004,  destino:'inetweb', dur:5, gap:7},
   descarga:    {etiqueta:'Descarga grande',    clase:'masivo',      bajada:Infinity, subida:0,    destino:'inetupd', elastica:true},
   respaldo:    {etiqueta:'Respaldo del servidor', clase:'masivo',   bajada:0,      subida:Infinity, destino:'servidor de respaldo', elastica:true},
-  cli_video:   {etiqueta:'Ver videos',         clase:'restringido', bajada:2.0,    subida:0.0012, destino:'streaming'},
-  cli_social:  {etiqueta:'Redes sociales',     clase:'restringido', bajada:0.6,    subida:0.15,   destino:'inetweb'},
-  cli_llamada: {etiqueta:'Videollamada del cliente', clase:'restringido', bajada:2.5, subida:1.5, destino:'inetvc',
+  cli_video:   {etiqueta:'Ver videos',         clase:'restringido', bajada:2.0,    subida:0.0012, destino:'streaming', vari:0.25, dur:25, gap:7},
+  cli_social:  {etiqueta:'Redes sociales',     clase:'restringido', bajada:0.6,    subida:0.15,   destino:'inetweb', dur:12, gap:10},
+  cli_llamada: {etiqueta:'Videollamada del cliente', clase:'restringido', bajada:2.5, subida:1.5, destino:'inetvc', dur:55, gap:20,
                 nota:'Gana la regla de segmento: el WiFi de clientes es restringido aunque sea una videollamada.'},
   cli_descarga:{etiqueta:'Descarga en el móvil', clase:'restringido', bajada:Infinity, subida:0,  destino:'inetupd', elastica:true},
-  per_llamada: {etiqueta:'Llamada por WiFi',   clase:'tiempo_real', bajada:0.0808, subida:0.0808, destino:'central de la oficina',
+  per_llamada: {etiqueta:'Llamada por WiFi',   clase:'tiempo_real', bajada:0.0808, subida:0.0808, destino:'central de la oficina', vari:0,
                 nota:'Mismo servicio que el cliente, pero este equipo no está en el WiFi de clientes: gana la regla de llamadas.'},
-  per_video:   {etiqueta:'Ver videos',         clase:'restringido', bajada:1.2,    subida:0.001,  destino:'streaming'},
+  per_video:   {etiqueta:'Ver videos',         clase:'restringido', bajada:1.2,    subida:0.001,  destino:'streaming', vari:0.25, dur:20, gap:9},
 };
+const FACTORES = [1, 2, 4, 6];
+let factor = 6;
+const VARIACION = 0.3;
 
 const PUERTA = {x: 184, y: 22};
 const SW = {x: 184, y: 32};
@@ -229,8 +231,24 @@ const EQUIPOS = construirEquipos();
 let qos = true;
 let dirVista = 'bajada';
 let seleccionado = null;
+let tSim = 0;
+let pausado = false;
 const activas = new Set();
 let reparto = null;
+
+const sello = s => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); };
+const ondulacion = (k, t) => Math.sin(t / 2300 + sello(k) % 97) * 0.62 + Math.sin(t / 830 + sello(k) % 41) * 0.38;
+
+function faseSesion(k, a, t) {
+  const periodo = a.dur + a.gap;
+  return ((t / 1000) + sello(k) % periodo) % periodo;
+}
+function enSesion(k, a, t) { return !a.dur || faseSesion(k, a, t) < a.dur; }
+function restante(k, a, t) {
+  if (!a.dur) return null;
+  const fase = faseSesion(k, a, t);
+  return Math.ceil(fase < a.dur ? a.dur - fase : a.dur + a.gap - fase);
+}
 
 const clave = (eq, act) => `${eq.id}:${act}`;
 const baseAct = act => act === 'camara2' ? 'camara' : act;
@@ -241,7 +259,14 @@ function flujosActivos() {
   for (const k of activas) {
     const [id, act] = k.split(':');
     const eq = EQUIPOS.find(e => e.id === id);
-    if (eq) salida.push({k, eq, act, a: datosAct(act)});
+    if (!eq) continue;
+    const a = datosAct(act);
+    const on = enSesion(k, a, tSim);
+    const mult = !on ? 0 : 1 + (a.vari ?? VARIACION) * ondulacion(k, tSim);
+    const dem = a.elastica
+      ? {bajada: on && a.bajada ? Infinity : 0, subida: on && a.subida ? Infinity : 0}
+      : {bajada: (a.bajada || 0) * mult, subida: (a.subida || 0) * mult};
+    salida.push({k, eq, act, a, on, dem});
   }
   return salida;
 }
@@ -260,7 +285,7 @@ function maxMin(demandas, capacidad) {
 }
 
 function repartirDireccion(flujos, dir, capacidad, conQos) {
-  const demandas = flujos.map(f => f.a[dir] || 0);
+  const demandas = flujos.map(f => f.dem[dir] || 0);
   const vivos = flujos.map((f, i) => i).filter(i => demandas[i] > 0);
   const asignado = flujos.map(() => 0);
   const porClase = {};
@@ -313,8 +338,9 @@ function recalcular() {
 }
 
 function servicio(f, i) {
-  const pide = (f.a.bajada || 0) + (f.a.subida || 0);
+  const pide = (f.dem.bajada || 0) + (f.dem.subida || 0);
   const recibe = reparto.bajada.asignado[i] + reparto.subida.asignado[i];
+  if (!f.on) return {pide: 0, recibe: 0, ratio: 1};
   return {pide, recibe, ratio: f.a.elastica ? Math.min(1, recibe / (SEDE.mbps * 0.4)) : (pide ? recibe / pide : 1)};
 }
 const tono = ratio => ratio >= 0.9 ? 'verde' : ratio >= 0.45 ? 'ambar' : 'rojo';
@@ -370,10 +396,18 @@ function pintarPanel() {
     ? '<p class="vacio">Nada encendido todavía.</p>'
     : flujos.map((f, i) => {
       const {pide, recibe, ratio} = servicio(f, i);
+      if (!f.on) {
+        return `<div class="enc" style="opacity:.45"><div class="cab"><span>`
+          + `<span class="sem" style="background:#4d5668"></span><b>${esc(f.a.etiqueta)}</b></span>`
+          + `<span class="cifra">vuelve en ${restante(f.k, f.a, tSim)} s</span></div>`
+          + `<div class="nota">${esc(f.eq.etiqueta)} · entre una sesión y la siguiente</div></div>`;
+      }
       const t = SEMAFORO[tono(ratio)].medio;
-      const cifra = f.a.elastica
+      const queda = restante(f.k, f.a, tSim);
+      const cifra = (f.a.elastica
         ? `ocupa ${num(recibe)} Mbps de lo que sobra`
-        : `${num(recibe)} de ${num(pide)} Mbps · ${(ratio * 100).toFixed(0)} %`;
+        : `${num(recibe)} de ${num(pide)} Mbps · ${(ratio * 100).toFixed(0)} %`)
+        + (queda === null ? '' : ` · quedan ${queda} s`);
       const q = esperaDe(f.a.clase, bajada.asignado[i] >= subida.asignado[i] ? bajada : subida);
       return `<div class="enc"><div class="cab"><span><span class="sem" style="background:${t}"></span>`
         + `<b>${esc(f.a.etiqueta)}</b></span><span class="cifra ${q.css}">cola ${q.texto}</span></div>`
@@ -383,6 +417,14 @@ function pintarPanel() {
         + `<div class="cifra">${cifra}</div></div>`;
     }).join('');
 }
+
+const ritmoVariacion = a => {
+  const v = a.vari ?? VARIACION;
+  return v ? ` ±${Math.round(v * 100)} %` : ' constantes';
+};
+const ritmoSesion = a => a.dur
+  ? `dura ${a.dur} s y descansa ${a.gap} s (tiempo simulado)`
+  : 'continua mientras esté encendida';
 
 function abrirMenu(eq) {
   seleccionado = eq;
@@ -401,7 +443,9 @@ function abrirMenu(eq) {
       return `<label><input type="checkbox" data-k="${k}" ${activas.has(k) ? 'checked' : ''}>`
         + `<span><b>${esc(a.etiqueta)}${sufijo}</b>`
         + `<small><span class="punto" style="background:${COLOR(a.clase)}"></span>${a.clase} · `
-        + (a.elastica ? 'elástica, ocupa lo que sobre' : `${num((a.bajada || 0) + (a.subida || 0))} Mbps`)
+        + (a.elastica ? 'elástica, ocupa lo que sobre'
+          : `${num((a.bajada || 0) + (a.subida || 0))} Mbps` + ritmoVariacion(a))
+        + `<br>${ritmoSesion(a)}`
         + `<br>hacia ${esc(a.destino)}`
         + (a.nota ? `<br><i>${esc(a.nota)}</i>` : '') + `</small></span></label>`;
     }).join('');
@@ -432,14 +476,51 @@ const PRESETS = {
                  'caja:descarga', 'cli0:cli_video', 'cli1:cli_video', 'cli2:cli_llamada', 'cli3:cli_social',
                  'cli4:cli_video', 'cli5:cli_descarga', 'cel1:per_llamada'],
 };
-$('presets').innerHTML = Object.keys(PRESETS).map(n => `<button data-p="${esc(n)}">${esc(n)}</button>`).join('');
-$('presets').querySelectorAll('button').forEach(b => b.onclick = () => {
+const NUCLEO = ['srv:reporte', 'nvr:camara', 'musica:musica'];
+const AUTO = [
+  {k:'tel:voip', p:0.55}, {k:'pos1:pago', p:0.8}, {k:'pos2:pago', p:0.55},
+  {k:'caja:videollamada', p:0.25}, {k:'caja:navegacion', p:0.5}, {k:'caja:descarga', p:0.12},
+  {k:'sorteos:sorteo', p:0.2}, {k:'nvr:camara2', p:0.5},
+  {k:'srv:respaldo', p:0.12}, {k:'srv:archivos', p:0.35},
+  {k:'cel1:navegacion', p:0.4}, {k:'cel1:per_video', p:0.25}, {k:'cel2:per_llamada', p:0.2},
+];
+for (let i = 0; i < 6; i++) {
+  AUTO.push({k:`cli${i}:cli_video`, p:0.45}, {k:`cli${i}:cli_social`, p:0.4},
+            {k:`cli${i}:cli_llamada`, p:0.12}, {k:`cli${i}:cli_descarga`, p:0.06});
+}
+let automatico = false;
+
+function marcarAuto() { $('auto').setAttribute('aria-pressed', String(automatico)); }
+
+function pasoAutomatico() {
+  for (const k of NUCLEO) activas.add(k);
+  for (let n = 0; n < 2; n++) {
+    const c = AUTO[Math.floor(Math.random() * AUTO.length)];
+    if (Math.random() < c.p) activas.add(c.k); else activas.delete(c.k);
+  }
+  if (seleccionado && $('menu').style.display === 'block') abrirMenu(seleccionado);
+}
+
+$('presets').innerHTML = Object.keys(PRESETS).map(n => `<button data-p="${esc(n)}">${esc(n)}</button>`).join('')
+  + '<button id="auto" aria-pressed="false" title="La sala se llena y se vacía sola">● En vivo</button>';
+$('presets').querySelectorAll('[data-p]').forEach(b => b.onclick = () => {
+  automatico = false;
+  marcarAuto();
   activas.clear();
   for (const k of PRESETS[b.dataset.p]) activas.add(k);
   cerrarMenu();
   recalcular();
 });
-$('vaciar').onclick = () => { activas.clear(); cerrarMenu(); recalcular(); };
+$('auto').onclick = () => {
+  automatico = !automatico;
+  marcarAuto();
+  if (automatico) {
+    activas.clear();
+    pasoAutomatico();
+    recalcular();
+  }
+};
+$('vaciar').onclick = () => { automatico = false; marcarAuto(); activas.clear(); cerrarMenu(); recalcular(); };
 
 for (const [id, otro, dir] of [['dir-bajada', 'dir-subida', 'bajada'], ['dir-subida', 'dir-bajada', 'subida']]) {
   $(id).onclick = () => {
@@ -680,7 +761,19 @@ function dibujar(ahora) {
   bulto(PASILLO - 13, SW.y, 26, 10, '#2a2440', '#403862', '#191430');
   for (let i = 0; i < 6; i++) r(PASILLO - 10 + i * 4, SW.y + 6, 2, 2, SEMAFORO[peor].medio);
 
-  for (const e of EQUIPOS) { const s = SPRITES[e.tipo]; if (s) s(e); }
+  const enPausa = new Set();
+  if (reparto) {
+    const porEquipo = {};
+    for (const f of reparto.flujos) porEquipo[f.eq.id] = porEquipo[f.eq.id] || f.on;
+    for (const [id, on] of Object.entries(porEquipo)) if (!on) enPausa.add(id);
+  }
+  for (const e of EQUIPOS) {
+    const s = SPRITES[e.tipo];
+    if (!s) continue;
+    ctx.globalAlpha = enPausa.has(e.id) ? 0.45 : 1;
+    s(e);
+  }
+  ctx.globalAlpha = 1;
   if (seleccionado) {
     ctx.strokeStyle = P.verde;
     ctx.lineWidth = 1;
@@ -757,8 +850,41 @@ document.addEventListener('keydown', e => {
   abrirMenu(NAVEGABLES[(i + paso + NAVEGABLES.length) % NAVEGABLES.length]);
 });
 
-function bucle(ahora) { dibujar(ahora); requestAnimationFrame(bucle); }
+$('pausa').onclick = () => {
+  pausado = !pausado;
+  $('pausa').textContent = pausado ? '▶ Reanudar' : '⏸ Pausar';
+  $('pausa').setAttribute('aria-pressed', String(pausado));
+};
+
+function reloj() {
+  const s = Math.floor(tSim / 1000);
+  $('reloj').textContent = `tiempo simulado ${String(Math.floor(s / 60)).padStart(2, '0')}:`
+    + String(s % 60).padStart(2, '0') + (pausado ? ' · en pausa' : '');
+}
+
+$('factor').onclick = () => {
+  factor = FACTORES[(FACTORES.indexOf(factor) + 1) % FACTORES.length];
+  $('factor').textContent = '×' + factor;
+};
+
+let anterior = null, desdeCalculo = 0, desdeAuto = 0;
+function bucle(ahora) {
+  const dt = anterior === null ? 0 : Math.min(ahora - anterior, 200);
+  anterior = ahora;
+  if (!pausado) {
+    tSim += dt * factor;
+    if (automatico) {
+      desdeAuto += dt * factor;
+      if (desdeAuto >= 4000) { desdeAuto = 0; pasoAutomatico(); }
+    }
+    desdeCalculo += dt;
+    if (desdeCalculo >= 250) { desdeCalculo = 0; recalcular(); reloj(); }
+  }
+  dibujar(ahora);
+  requestAnimationFrame(bucle);
+}
 recalcular();
+reloj();
 requestAnimationFrame(bucle);
 </script>
 </html>
