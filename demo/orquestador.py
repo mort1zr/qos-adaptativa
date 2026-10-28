@@ -463,6 +463,8 @@ def crear_handler(demo):
                         return self.responder((demo.raiz / "demo/consola/index.html").read_bytes(), tipo="text/html; charset=utf-8")
                     if ruta == "/panel":
                         return self.responder((demo.raiz / "controlador/panel/index.html").read_bytes(), tipo="text/html; charset=utf-8")
+                    if ruta == "/oficina":
+                        return self.responder((demo.raiz / "demo/consola/oficina.html").read_bytes(), tipo="text/html; charset=utf-8")
                     if ruta == "/demo/estado":
                         return self.responder(demo.estado())
                     if ruta == "/demo/escenarios":

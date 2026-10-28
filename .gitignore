@@ -1,4 +1,5 @@
 .venv/
+.venv-dev/
 topologia/inventario.csv
 __pycache__/
 datos/
