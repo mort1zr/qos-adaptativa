@@ -89,6 +89,8 @@ def comandos_evidencia(tipo, sala):
 
 
 class Demo:
+    ESPERA_REINICIO_S = 8      # tiempo que se espera a que Docker reviva el controlador tras `mn -c`
+
     def __init__(self, raiz=RAIZ, ejecutar=subprocess.run, lanzar=subprocess.Popen, vista_previa=False,
                  api_url="http://127.0.0.1:8080", controlador=None):
         self.api_url = api_url
@@ -202,12 +204,13 @@ class Demo:
                                stderr=subprocess.STDOUT, text=True, start_new_session=True)
         except OSError as e:
             raise ErrorDemo("No se pudo iniciar el trabajo: %s" % e, 500)
-        self.trabajo = {"tipo": tipo, "estado": "iniciando", "inicio": time.time(), "parametros": parametros}
-        self.red_lista = False
-        self.proceso = proc
-        if tipo == "escenario":
-            self.trabajo["estado"] = "corriendo"
-        threading.Thread(target=self.vigilar, args=(proc, self.trabajo), daemon=True).start()
+        with self.lock:
+            self.trabajo = {"tipo": tipo, "estado": "corriendo" if tipo == "escenario" else "iniciando",
+                            "inicio": time.time(), "parametros": parametros}
+            self.red_lista = False
+            self.proceso = proc
+            trabajo = self.trabajo
+        threading.Thread(target=self.vigilar, args=(proc, trabajo), daemon=True).start()
 
     def controlador(self, iniciar):
         if not iniciar and self.activo():
@@ -275,18 +278,20 @@ class Demo:
             trabajo["cancelando"] = True
         self.terminar_proceso(proc)
         # No permitir que una limpieza vieja alcance una red nueva.
-        self.limpiar(propia=True)
-        with self.lock:
-            trabajo["estado"] = "cancelado"
-            self.red_lista = False
-            if self.proceso is proc:
-                self.proceso = None
-        progreso = leer_progreso(self.raiz / "datos")["progreso"]
-        if trabajo["tipo"] == "escenario" and progreso:
-            from escenarios.progreso import Progreso
-            p = Progreso(self.raiz / "datos/progreso.json")
-            p.datos = progreso
-            p.finalizar("cancelado", "Cancelado desde la consola")
+        try:
+            self.limpiar(propia=True)
+        finally:
+            with self.lock:
+                trabajo["estado"] = "cancelado"
+                self.red_lista = False
+                if self.proceso is proc:
+                    self.proceso = None
+            progreso = leer_progreso(self.raiz / "datos")["progreso"]
+            if trabajo["tipo"] == "escenario" and progreso:
+                from escenarios.progreso import Progreso
+                p = Progreso(self.raiz / "datos/progreso.json")
+                p.datos = progreso
+                p.finalizar("cancelado", "Cancelado desde la consola")
 
     def verificar_red_externa(self):
         try:
@@ -304,9 +309,27 @@ class Demo:
             self.verificar_red_externa()
         encendido = self.api_activa()
         self.run(["mn", "-c"], timeout=30)
-        if encendido and self.cfg["controlador"] == "venv" and not self.api_activa():
-            self.controlador(True)
-        self.devolver_archivos()
+        try:
+            if encendido:
+                self.recuperar_controlador()
+        finally:
+            self.devolver_archivos()
+
+    def recuperar_controlador(self):
+        """`mn -c` ejecuta `killall ryu-manager` como root y, desde el host, también ve los
+        procesos de un contenedor: el controlador puede caer en cualquier modo, no solo en venv.
+        En modo Docker se le da unos segundos a `restart: unless-stopped`; si no vuelve
+        (o es venv, que no se revive solo), se arranca de nuevo."""
+        espera = 0 if self.cfg["controlador"] == "venv" else self.ESPERA_REINICIO_S
+        limite = time.monotonic() + espera
+        while True:
+            if self.api_activa():
+                return
+            if time.monotonic() >= limite:
+                break
+            time.sleep(0.5)
+        self.log("*** Limpiar apagó el controlador: se inicia de nuevo")
+        self.controlador(True)
 
     def actuar(self, ruta, cuerpo):
         if self.vista_previa:

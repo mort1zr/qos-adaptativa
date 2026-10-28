@@ -191,8 +191,10 @@ estrategias: [sin_qos, fila_corta, prioridad, estatica]
   - **`venv`:** Ryu del `.venv`, lanzado **como el usuario normal**, no como root:
     `["sudo", "-u", os.environ["SUDO_USER"], RYU, "controlador/qos_app.py"]` con `cwd` en la raíz del repo.
   - **`docker`:** `["docker", "compose", "up", "-d"]` / `["docker", "compose", "down"]`.
-  - En los modos `lab` y `docker`, `sudo mn -c` no afecta al controlador (no es un proceso
-    `ryu-manager` del host).
+  - En los modos `lab` y `docker`, `sudo mn -c` **sí puede** apagar al controlador: `killall ryu-manager`
+    como root alcanza también a los procesos de un contenedor. `restart: unless-stopped` suele
+    revivirlo; tras limpiar, el orquestador espera unos segundos (`ESPERA_REINICIO_S`) y, si la API
+    no vuelve, lo inicia de nuevo.
 - Todo archivo que el orquestador o sus hijos creen como root en `datos/`, `topologia/` o
   `experimentos/resultados/` se devuelve al usuario (`os.chown` a `SUDO_UID`/`SUDO_GID`), igual
   que `devolver_al_usuario()` en `escenarios/escenario.py`.
@@ -592,7 +594,7 @@ Todas deben pasar con `python3 -m unittest discover -p "test_*.py"` y con el pip
 
 | Trampa | Qué pasa | Qué hacer |
 |---|---|---|
-| `sudo mn -c` mata a `ryu-manager` | El controlador se apaga sin aviso | Después de limpiar, el orquestador reinicia Ryu si estaba encendido |
+| `sudo mn -c` mata a `ryu-manager` (también el de un contenedor) | El controlador se apaga sin aviso, en cualquier modo | Después de limpiar, el orquestador comprueba la API y reinicia el controlador si estaba encendido y no volvió |
 | Ryu necesita Python 3.9 (`.venv`); Mininet usa 3.10 del sistema | `import ryu` falla con el Python equivocado | Código de `controlador/` compatible con 3.9; orquestador y escenarios con el 3.10 del sistema |
 | Archivos creados por `sudo` quedan de root | Luego el análisis falla con `PermissionError` | `chown` a `SUDO_UID:SUDO_GID` (ya existe `devolver_al_usuario()`) |
 | `tc qdisc replace … netem` conserva el `rate` anterior | El enlace queda limitado después de la fase degradada | Ya está resuelto en `escenarios/operador.py`; no reimplementarlo |

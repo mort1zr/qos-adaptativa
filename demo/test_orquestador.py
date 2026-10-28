@@ -167,6 +167,66 @@ class Acciones(unittest.TestCase):
             self.demo.limpiar(propia=True)
         controlador.assert_called_once_with(True)
 
+    def test_limpiar_no_toca_el_controlador_si_sigue_vivo(self):
+        for modo in ("lab", "docker", "venv"):
+            with self.subTest(modo=modo):
+                self.demo.cfg["controlador"] = modo
+                self.demo.api_activa = Mock(return_value=True)
+                self.run.return_value = subprocess.CompletedProcess([], 0, "", "")
+                with patch.object(self.demo, "controlador") as controlador:
+                    self.demo.limpiar(propia=True)
+                controlador.assert_not_called()
+
+    def test_limpiar_espera_a_que_docker_reviva_el_controlador(self):
+        self.demo.cfg["controlador"] = "lab"
+        self.demo.api_activa = Mock(side_effect=[True, False, False, True])
+        self.run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        with patch.object(self.demo, "controlador") as controlador, patch("demo.orquestador.time.sleep"):
+            self.demo.limpiar(propia=True)
+        controlador.assert_not_called()
+
+    def test_limpiar_arranca_el_contenedor_si_no_revive(self):
+        for modo in ("lab", "docker"):
+            with self.subTest(modo=modo):
+                self.demo.cfg["controlador"] = modo
+                self.demo.ESPERA_REINICIO_S = 0
+                self.demo.api_activa = Mock(side_effect=[True, False])
+                self.run.return_value = subprocess.CompletedProcess([], 0, "", "")
+                with patch.object(self.demo, "controlador") as controlador:
+                    self.demo.limpiar(propia=True)
+                controlador.assert_called_once_with(True)
+                self.assertIn("se inicia de nuevo", self.demo.logs[-1]["texto"])
+
+    def test_limpiar_no_arranca_un_controlador_que_estaba_apagado(self):
+        self.demo.cfg["controlador"] = "lab"
+        self.demo.api_activa = Mock(return_value=False)
+        self.run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        with patch.object(self.demo, "controlador") as controlador:
+            self.demo.limpiar(propia=True)
+        controlador.assert_not_called()
+
+    def test_limpiar_devuelve_archivos_aunque_falle_el_reinicio(self):
+        self.demo.cfg["controlador"] = "lab"
+        self.demo.ESPERA_REINICIO_S = 0
+        self.demo.api_activa = Mock(side_effect=[True, False])
+        self.run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        with patch.object(self.demo, "controlador", side_effect=ErrorDemo("sin despliegue", 409)), \
+                patch.object(self.demo, "devolver_archivos") as devolver:
+            with self.assertRaises(ErrorDemo):
+                self.demo.limpiar(propia=True)
+        devolver.assert_called_once()
+
+    def test_cancelar_deja_estado_final_aunque_la_limpieza_falle(self):
+        trabajo = {"tipo": "red", "estado": "corriendo"}
+        self.demo.trabajo, self.demo.proceso = trabajo, Mock()
+        with patch.object(self.demo, "terminar_proceso"), \
+                patch.object(self.demo, "limpiar", side_effect=ErrorDemo("mn falló", 500)):
+            with self.assertRaises(ErrorDemo):
+                self.demo.cancelar()
+        self.assertEqual(trabajo["estado"], "cancelado")
+        self.assertFalse(self.demo.red_lista)
+        self.assertIsNone(self.demo.proceso)
+
 
 class HTTPTests(unittest.TestCase):
     @classmethod

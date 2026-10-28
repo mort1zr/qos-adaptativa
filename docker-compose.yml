@@ -7,7 +7,10 @@
 # La topología de Mininet no cambia: sigue conectándose a 127.0.0.1:6633, que ahora
 # es el contenedor. Abre el panel en http://127.0.0.1:8080/panel
 #
-# Ojo: "sudo mn -c" ya no apaga al controlador (antes mataba a ryu-manager), pero
+# Ojo: "sudo mn -c" ejecuta "killall ryu-manager" y, como root en el host, también ve los
+# procesos de los contenedores: puede apagar este controlador. "restart: unless-stopped" lo
+# revive solo, y la consola de demo (demo/orquestador.py) lo comprueba tras "Limpiar todo" y
+# lo vuelve a iniciar si no volvió. Si usas "mn -c" a mano, revisa "docker ps" después.
 # NO levantes a la vez el Ryu del .venv y el contenedor: los dos quieren el puerto 6633.
 services:
   controlador:
